@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Fixed window fullscreen leaving the video at its previous calculated size against a black background.
+- Applies fullscreen positioning only to the actual YouTube player instead of every nested page container.
+- Forces the video surface and controls to follow the current Brave window dimensions.
+- Recalculates the player after entering fullscreen and whenever the window is resized.
+
 ## 0.2.0
 
 - Removed the separate URL-launcher window.
