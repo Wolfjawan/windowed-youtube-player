@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: windows-release-${{ github.ref }}
@@ -33,6 +34,7 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Publish self-contained Windows app
+        id: publish
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path artifacts -Force | Out-Null
@@ -44,7 +46,11 @@ jobs:
             -p:PublishSingleFile=true `
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:ContinuousIntegrationBuild=true `
-            --output artifacts/win-x64
+            --output artifacts/win-x64 2>&1 | Tee-Object -FilePath artifacts/build.log
+
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
       - name: Package Windows build
         shell: pwsh
@@ -64,6 +70,7 @@ jobs:
           path: |
             artifacts/WindowedYouTubePlayer-win-x64.zip
             artifacts/WindowedYouTubePlayer-win-x64.sha256
+            artifacts/build.log
           if-no-files-found: error
 
       - name: Select release version
@@ -104,3 +111,31 @@ jobs:
               --generate-notes `
               --latest
           }
+
+      - name: Report publish failure
+        if: failure() && steps.publish.outcome == 'failure'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $log = if (Test-Path artifacts/build.log) {
+            (Get-Content artifacts/build.log -Tail 180) -join "`n"
+          } else {
+            "The publish step failed before a build log was created."
+          }
+
+          $body = @"
+          The Windows build failed in workflow run ${{ github.run_id }}.
+
+          Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          ```text
+          $log
+          ```
+          "@
+
+          $body | Set-Content artifacts/failure-issue.md
+          gh issue create `
+            --repo "${{ github.repository }}" `
+            --title "Windows CI failure in run ${{ github.run_number }}" `
+            --body-file artifacts/failure-issue.md
