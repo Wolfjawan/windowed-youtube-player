@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version, for example v0.2.0
+        description: Release version, for example v0.2.1
         required: true
-        default: v0.2.0
+        default: v0.2.1
         type: string
 
 permissions:
@@ -82,7 +82,7 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             tag="${{ inputs.version }}"
           else
-            tag="v0.2.0"
+            tag="v0.2.1"
           fi
 
           if [[ "$tag" != v* ]]; then
