@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -33,35 +33,30 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Publish self-contained Windows app
+      - name: Publish self-contained Windows x64 app
         id: publish
-        shell: pwsh
+        shell: bash
         run: |
-          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          set -o pipefail
+          mkdir -p artifacts
 
-          dotnet publish src/WindowedYouTubePlayer/WindowedYouTubePlayer.csproj `
-            --configuration Release `
-            --runtime win-x64 `
-            --self-contained true `
-            -p:PublishSingleFile=true `
-            -p:IncludeNativeLibrariesForSelfExtract=true `
-            -p:ContinuousIntegrationBuild=true `
-            --output artifacts/win-x64 2>&1 | Tee-Object -FilePath artifacts/build.log
-
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
+          dotnet publish src/WindowedYouTubePlayer/WindowedYouTubePlayer.csproj \
+            --configuration Release \
+            --runtime win-x64 \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:ContinuousIntegrationBuild=true \
+            -p:EnableWindowsTargeting=true \
+            --output artifacts/win-x64 2>&1 | tee artifacts/build.log
 
       - name: Package Windows build
-        shell: pwsh
+        shell: bash
         run: |
-          Compress-Archive `
-            -Path artifacts/win-x64/* `
-            -DestinationPath artifacts/WindowedYouTubePlayer-win-x64.zip `
-            -Force
-
-          $hash = (Get-FileHash artifacts/WindowedYouTubePlayer-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  WindowedYouTubePlayer-win-x64.zip" | Set-Content artifacts/WindowedYouTubePlayer-win-x64.sha256
+          cd artifacts/win-x64
+          zip -r ../WindowedYouTubePlayer-win-x64.zip .
+          cd ..
+          sha256sum WindowedYouTubePlayer-win-x64.zip > WindowedYouTubePlayer-win-x64.sha256
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -75,83 +70,49 @@ jobs:
 
       - name: Select release version
         if: github.event_name != 'pull_request'
-        shell: pwsh
+        shell: bash
         run: |
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $tag = "${{ inputs.version }}"
-          } else {
-            $tag = "v0.1.0"
-          }
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.version }}"
+          else
+            tag="v0.1.0"
+          fi
 
-          if (-not $tag.StartsWith("v")) {
-            $tag = "v$tag"
-          }
+          if [[ "$tag" != v* ]]; then
+            tag="v$tag"
+          fi
 
-          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
 
       - name: Create or update GitHub Release
         if: github.event_name != 'pull_request'
-        shell: pwsh
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$env:RELEASE_TAG" --repo "${{ github.repository }}" *> $null
-
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload "$env:RELEASE_TAG" `
-              artifacts/WindowedYouTubePlayer-win-x64.zip `
-              artifacts/WindowedYouTubePlayer-win-x64.sha256 `
-              --repo "${{ github.repository }}" `
+          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              artifacts/WindowedYouTubePlayer-win-x64.zip \
+              artifacts/WindowedYouTubePlayer-win-x64.sha256 \
+              --repo "${{ github.repository }}" \
               --clobber
-          } else {
-            gh release create "$env:RELEASE_TAG" `
-              artifacts/WindowedYouTubePlayer-win-x64.zip `
-              artifacts/WindowedYouTubePlayer-win-x64.sha256 `
-              --repo "${{ github.repository }}" `
-              --target "${{ github.sha }}" `
-              --title "Windowed YouTube Player $env:RELEASE_TAG" `
+          else
+            gh release create "$RELEASE_TAG" \
+              artifacts/WindowedYouTubePlayer-win-x64.zip \
+              artifacts/WindowedYouTubePlayer-win-x64.sha256 \
+              --repo "${{ github.repository }}" \
+              --target "${{ github.sha }}" \
+              --title "Windowed YouTube Player $RELEASE_TAG" \
               --generate-notes
-          }
-
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
-
-      - name: Report publish failure
-        if: failure() && steps.publish.outcome == 'failure'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $log = if (Test-Path artifacts/build.log) {
-            (Get-Content artifacts/build.log -Tail 180) -join "`n"
-          } else {
-            "The publish step failed before a build log was created."
-          }
-
-          $body = @"
-          The Windows build failed in workflow run ${{ github.run_id }}.
-
-          Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-          ```text
-          $log
-          ```
-          "@
-
-          $body | Set-Content artifacts/failure-issue.md
-          gh issue create `
-            --repo "${{ github.repository }}" `
-            --title "Windows CI failure in run ${{ github.run_number }}" `
-            --body-file artifacts/failure-issue.md
+          fi
 
       - name: Report final workflow result
         if: always() && github.event_name != 'pull_request'
-        shell: pwsh
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $body = @"
+          cat > artifacts/workflow-result.md <<EOF
           Status: **${{ job.status }}**
 
           Commit: `${{ github.sha }}`
@@ -159,10 +120,18 @@ jobs:
           Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
           Expected release: https://github.com/${{ github.repository }}/releases/tag/v0.1.0
-          "@
+          EOF
 
-          $body | Set-Content artifacts/workflow-result.md
-          gh issue create `
-            --repo "${{ github.repository }}" `
-            --title "Windows release verification run ${{ github.run_number }}: ${{ job.status }}" `
+          if [[ -f artifacts/build.log ]]; then
+            {
+              echo
+              echo '```text'
+              tail -n 120 artifacts/build.log
+              echo '```'
+            } >> artifacts/workflow-result.md
+          fi
+
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "Windows release verification run ${{ github.run_number }}: ${{ job.status }}" \
             --body-file artifacts/workflow-result.md
