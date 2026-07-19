@@ -1,0 +1,40 @@
+name: Build Windows app
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore WindowedYouTubePlayer.sln
+
+      - name: Build
+        run: dotnet build WindowedYouTubePlayer.sln --configuration Release --no-restore
+
+      - name: Publish self-contained app
+        shell: pwsh
+        run: ./scripts/publish.ps1
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: WindowedYouTubePlayer-win-x64
+          path: artifacts/win-x64/
+          if-no-files-found: error
