@@ -1,5 +1,8 @@
 using System.Diagnostics;
 using System.Drawing;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
 using System.Windows.Forms;
@@ -24,6 +27,7 @@ internal sealed class MainForm : Form
     private readonly NumericUpDown _heightInput = new();
     private readonly CheckBox _autoplayCheckBox = new();
     private readonly Label _statusLabel = new();
+    private readonly List<LoopbackPlayerHost> _playerHosts = [];
 
     public MainForm()
     {
@@ -40,6 +44,16 @@ internal sealed class MainForm : Form
         _heightInput.Value = 720;
         _autoplayCheckBox.Checked = true;
         _bravePathTextBox.Text = FindBrave() ?? "Brave was not found. Click Browse…";
+
+        FormClosed += (_, _) =>
+        {
+            foreach (LoopbackPlayerHost host in _playerHosts)
+            {
+                host.Dispose();
+            }
+
+            _playerHosts.Clear();
+        };
     }
 
     private void BuildLayout()
@@ -56,6 +70,7 @@ internal sealed class MainForm : Form
         {
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         }
+
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
         Label title = new()
@@ -166,7 +181,7 @@ internal sealed class MainForm : Form
 
     private void LaunchPlayer()
     {
-        if (!TryCreatePlayerUrl(_urlTextBox.Text, _autoplayCheckBox.Checked, out string? playerUrl, out string error))
+        if (!TryCreatePlayerUrl(_urlTextBox.Text, _autoplayCheckBox.Checked, out string? embedUrl, out string error))
         {
             SetStatus(error, true);
             return;
@@ -179,24 +194,35 @@ internal sealed class MainForm : Form
             return;
         }
 
+        LoopbackPlayerHost? host = null;
+
         try
         {
+            host = LoopbackPlayerHost.Start(embedUrl!);
+            _playerHosts.Add(host);
+
             ProcessStartInfo startInfo = new(bravePath)
             {
                 UseShellExecute = false
             };
 
-            startInfo.ArgumentList.Add($"--app={playerUrl}");
+            startInfo.ArgumentList.Add($"--app={host.PlayerUrl}");
             startInfo.ArgumentList.Add("--new-window");
             startInfo.ArgumentList.Add($"--window-size={(int)_widthInput.Value},{(int)_heightInput.Value}");
             startInfo.ArgumentList.Add("--disable-session-crashed-bubble");
 
             Process.Start(startInfo);
-            SetStatus("Player opened. Move and resize the Brave app window anywhere on your monitor.", false);
+            SetStatus("Player opened through the local host page. Error 153 should no longer occur.", false);
         }
         catch (Exception exception)
         {
-            SetStatus($"Could not start Brave: {exception.Message}", true);
+            if (host is not null)
+            {
+                _playerHosts.Remove(host);
+                host.Dispose();
+            }
+
+            SetStatus($"Could not start the player: {exception.Message}", true);
         }
     }
 
@@ -304,6 +330,7 @@ internal sealed class MainForm : Form
         [
             $"autoplay={(autoplay ? 1 : 0)}",
             "controls=1",
+            "enablejsapi=1",
             "fs=0",
             "playsinline=1",
             "rel=0"
@@ -412,5 +439,171 @@ internal sealed class MainForm : Form
     {
         _statusLabel.Text = message;
         _statusLabel.ForeColor = error ? Color.Firebrick : SystemColors.GrayText;
+    }
+}
+
+internal sealed class LoopbackPlayerHost : IDisposable
+{
+    private readonly TcpListener _listener;
+    private readonly CancellationTokenSource _cancellation = new();
+    private readonly byte[] _htmlBytes;
+    private readonly Task _acceptLoop;
+    private bool _disposed;
+
+    private LoopbackPlayerHost(TcpListener listener, string origin, string embedUrl)
+    {
+        _listener = listener;
+        PlayerUrl = $"{origin}/";
+
+        string separator = embedUrl.Contains('?') ? "&" : "?";
+        string identifiedEmbedUrl =
+            $"{embedUrl}{separator}origin={Uri.EscapeDataString(origin)}&widget_referrer={Uri.EscapeDataString(PlayerUrl)}";
+
+        string encodedEmbedUrl = WebUtility.HtmlEncode(identifiedEmbedUrl);
+        string html = $$"""
+            <!doctype html>
+            <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <meta name="referrer" content="strict-origin-when-cross-origin">
+              <title>Windowed YouTube Player</title>
+              <style>
+                html, body {
+                  width: 100%;
+                  height: 100%;
+                  margin: 0;
+                  overflow: hidden;
+                  background: #000;
+                }
+
+                iframe {
+                  display: block;
+                  width: 100vw;
+                  height: 100vh;
+                  border: 0;
+                  background: #000;
+                }
+              </style>
+            </head>
+            <body>
+              <iframe
+                src="{{encodedEmbedUrl}}"
+                title="YouTube video player"
+                referrerpolicy="strict-origin-when-cross-origin"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share">
+              </iframe>
+            </body>
+            </html>
+            """;
+
+        _htmlBytes = Encoding.UTF8.GetBytes(html);
+        _acceptLoop = Task.Run(AcceptLoopAsync);
+    }
+
+    public string PlayerUrl { get; }
+
+    public static LoopbackPlayerHost Start(string embedUrl)
+    {
+        TcpListener listener = new(IPAddress.Loopback, 0);
+        listener.Start();
+
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        string origin = $"http://127.0.0.1:{port}";
+
+        return new LoopbackPlayerHost(listener, origin, embedUrl);
+    }
+
+    private async Task AcceptLoopAsync()
+    {
+        try
+        {
+            while (!_cancellation.IsCancellationRequested)
+            {
+                TcpClient client = await _listener.AcceptTcpClientAsync(_cancellation.Token);
+                _ = HandleClientAsync(client);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Normal shutdown.
+        }
+    }
+
+    private async Task HandleClientAsync(TcpClient client)
+    {
+        using (client)
+        {
+            try
+            {
+                await using NetworkStream stream = client.GetStream();
+                using StreamReader reader = new(stream, Encoding.ASCII, false, 1024, leaveOpen: true);
+
+                string? requestLine = await reader.ReadLineAsync(_cancellation.Token);
+                if (string.IsNullOrWhiteSpace(requestLine))
+                {
+                    return;
+                }
+
+                while (true)
+                {
+                    string? headerLine = await reader.ReadLineAsync(_cancellation.Token);
+                    if (string.IsNullOrEmpty(headerLine))
+                    {
+                        break;
+                    }
+                }
+
+                bool faviconRequest = requestLine.StartsWith("GET /favicon.ico ", StringComparison.OrdinalIgnoreCase);
+                byte[] body = faviconRequest ? [] : _htmlBytes;
+                string status = faviconRequest ? "204 No Content" : "200 OK";
+                string contentType = faviconRequest ? "text/plain" : "text/html; charset=utf-8";
+
+                string headers =
+                    $"HTTP/1.1 {status}\r\n" +
+                    $"Content-Type: {contentType}\r\n" +
+                    $"Content-Length: {body.Length}\r\n" +
+                    "Cache-Control: no-store, no-cache, must-revalidate\r\n" +
+                    "Pragma: no-cache\r\n" +
+                    "Referrer-Policy: strict-origin-when-cross-origin\r\n" +
+                    "X-Content-Type-Options: nosniff\r\n" +
+                    "Connection: close\r\n\r\n";
+
+                byte[] headerBytes = Encoding.ASCII.GetBytes(headers);
+                await stream.WriteAsync(headerBytes, _cancellation.Token);
+
+                if (body.Length > 0)
+                {
+                    await stream.WriteAsync(body, _cancellation.Token);
+                }
+
+                await stream.FlushAsync(_cancellation.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Host is shutting down.
+            }
+            catch (IOException)
+            {
+                // The browser disconnected before the response completed.
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _cancellation.Cancel();
+        _listener.Stop();
+        _cancellation.Dispose();
     }
 }

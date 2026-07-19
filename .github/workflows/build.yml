@@ -3,22 +3,21 @@ name: Build and release Windows app
 on:
   push:
     branches: ["main"]
-  pull_request_target:
-    types: [opened, reopened, synchronize]
+  pull_request:
+    branches: ["main"]
   workflow_dispatch:
     inputs:
       version:
-        description: Release version, for example v0.1.0
+        description: Release version, for example v0.1.1
         required: true
-        default: v0.1.0
+        default: v0.1.1
         type: string
 
 permissions:
   contents: write
-  issues: write
 
 concurrency:
-  group: windows-release-${{ github.ref }}
+  group: windowed-youtube-player-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -26,10 +25,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout trusted main branch
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Set up .NET 8
         uses: actions/setup-dotnet@v4
@@ -37,10 +34,9 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Publish self-contained Windows x64 app
-        id: publish
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           mkdir -p artifacts
 
           dotnet publish src/WindowedYouTubePlayer/WindowedYouTubePlayer.csproj \
@@ -72,12 +68,13 @@ jobs:
           if-no-files-found: error
 
       - name: Select release version
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             tag="${{ inputs.version }}"
           else
-            tag="v0.1.0"
+            tag="v0.1.1"
           fi
 
           if [[ "$tag" != v* ]]; then
@@ -87,6 +84,7 @@ jobs:
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
 
       - name: Create or update GitHub Release
+        if: github.event_name != 'pull_request'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,40 +100,7 @@ jobs:
               artifacts/WindowedYouTubePlayer-win-x64.zip \
               artifacts/WindowedYouTubePlayer-win-x64.sha256 \
               --repo "${{ github.repository }}" \
-              --target main \
+              --target "${{ github.sha }}" \
               --title "Windowed YouTube Player $RELEASE_TAG" \
               --generate-notes
           fi
-
-      - name: Report final workflow result
-        if: always()
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p artifacts
-          cat > artifacts/workflow-result.md <<EOF
-          Status: **${{ job.status }}**
-
-          Commit: `${{ github.sha }}`
-
-          Event: `${{ github.event_name }}`
-
-          Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-          Expected release: https://github.com/${{ github.repository }}/releases/tag/v0.1.0
-          EOF
-
-          if [[ -f artifacts/build.log ]]; then
-            {
-              echo
-              echo '```text'
-              tail -n 120 artifacts/build.log
-              echo '```'
-            } >> artifacts/workflow-result.md
-          fi
-
-          gh issue create \
-            --repo "${{ github.repository }}" \
-            --title "Windows release verification run ${{ github.run_number }}: ${{ job.status }}" \
-            --body-file artifacts/workflow-result.md
