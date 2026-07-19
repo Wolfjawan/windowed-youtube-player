@@ -73,8 +73,7 @@ internal static class BraveYouTubeApp
         startInfo.ArgumentList.Add("--disable-session-crashed-bubble");
         startInfo.ArgumentList.Add("--disable-background-mode");
 
-        Process? process = Process.Start(startInfo);
-        if (process is null)
+        if (Process.Start(startInfo) is null)
         {
             throw new InvalidOperationException("Brave did not return a running process.");
         }
@@ -171,7 +170,7 @@ internal static class BraveLocator
         }
         catch
         {
-            // Brave can still launch if the preferred path cannot be persisted.
+            // Brave can still launch if this preference cannot be saved.
         }
     }
 
@@ -232,19 +231,9 @@ internal static class YouTubeWindowExtension
     public static void Install(string extensionDirectory)
     {
         Directory.CreateDirectory(extensionDirectory);
-
-        File.WriteAllText(
-            Path.Combine(extensionDirectory, "manifest.json"),
-            Manifest,
-            Utf8WithoutBom);
-        File.WriteAllText(
-            Path.Combine(extensionDirectory, "content.css"),
-            ContentCss,
-            Utf8WithoutBom);
-        File.WriteAllText(
-            Path.Combine(extensionDirectory, "content.js"),
-            ContentScript,
-            Utf8WithoutBom);
+        File.WriteAllText(Path.Combine(extensionDirectory, "manifest.json"), Manifest, Utf8WithoutBom);
+        File.WriteAllText(Path.Combine(extensionDirectory, "content.css"), ContentCss, Utf8WithoutBom);
+        File.WriteAllText(Path.Combine(extensionDirectory, "content.js"), ContentScript, Utf8WithoutBom);
     }
 
     private const string Manifest = """
@@ -253,19 +242,13 @@ internal static class YouTubeWindowExtension
           "name": "Windowed YouTube Player",
           "version": "0.2.1",
           "description": "Makes YouTube fullscreen fill only its resizable Brave app window.",
-          "content_scripts": [
-            {
-              "matches": [
-                "https://www.youtube.com/*",
-                "https://youtube.com/*",
-                "https://m.youtube.com/*"
-              ],
-              "css": ["content.css"],
-              "js": ["content.js"],
-              "run_at": "document_start",
-              "all_frames": false
-            }
-          ]
+          "content_scripts": [{
+            "matches": ["https://www.youtube.com/*", "https://youtube.com/*", "https://m.youtube.com/*"],
+            "css": ["content.css"],
+            "js": ["content.js"],
+            "run_at": "document_start",
+            "all_frames": false
+          }]
         }
         """;
 
@@ -354,49 +337,33 @@ internal static class YouTubeWindowExtension
           transition: opacity 140ms ease;
         }
 
-        #wyp-window-fullscreen-hint.wyp-visible {
-          opacity: 1;
-        }
+        #wyp-window-fullscreen-hint.wyp-visible { opacity: 1; }
         """;
 
     private const string ContentScript = """
         (() => {
           'use strict';
-
-          if (window.top !== window.self) {
-            return;
-          }
+          if (window.top !== window.self) return;
 
           const rootClass = 'wyp-window-fullscreen';
           const hintId = 'wyp-window-fullscreen-hint';
           let hintTimer = 0;
           let resizeFrame = 0;
 
-          const playerElement = () =>
-            document.querySelector('#movie_player, .html5-video-player');
-
-          const isWatchPage = () =>
-            location.pathname === '/watch'
+          const playerElement = () => document.querySelector('#movie_player, .html5-video-player');
+          const isWatchPage = () => location.pathname === '/watch'
             || location.pathname.startsWith('/live/')
             || location.pathname.startsWith('/shorts/');
-
-          const isEditableTarget = target => {
-            if (!(target instanceof Element)) {
-              return false;
-            }
-
-            return target.matches('input, textarea, select, [contenteditable="true"]')
-              || Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
-          };
-
-          const isWindowFullscreen = () =>
-            document.documentElement.classList.contains(rootClass);
+          const isWindowFullscreen = () => document.documentElement.classList.contains(rootClass);
+          const isEditableTarget = target => target instanceof Element && (
+            target.matches('input, textarea, select, [contenteditable="true"]')
+            || Boolean(target.closest('input, textarea, select, [contenteditable="true"]'))
+          );
 
           function updateFullscreenButtons() {
             const label = isWindowFullscreen()
               ? 'Exit window fullscreen (Esc)'
               : 'Fill this window (F)';
-
             document.querySelectorAll('.ytp-fullscreen-button').forEach(button => {
               button.setAttribute('title', label);
               button.setAttribute('aria-label', label);
@@ -407,9 +374,7 @@ internal static class YouTubeWindowExtension
             window.cancelAnimationFrame(resizeFrame);
             resizeFrame = window.requestAnimationFrame(() => {
               const player = playerElement();
-              if (!player || !isWindowFullscreen()) {
-                return;
-              }
+              if (!player || !isWindowFullscreen()) return;
 
               player.style.setProperty('width', `${window.innerWidth}px`, 'important');
               player.style.setProperty('height', `${window.innerHeight}px`, 'important');
@@ -422,16 +387,11 @@ internal static class YouTubeWindowExtension
                 video.style.setProperty('top', '0', 'important');
                 video.style.setProperty('transform', 'none', 'important');
               }
-
-              window.dispatchEvent(new Event('resize'));
             });
           }
 
           function showHint() {
-            if (!document.body) {
-              return;
-            }
-
+            if (!document.body) return;
             let hint = document.getElementById(hintId);
             if (!hint) {
               hint = document.createElement('div');
@@ -439,19 +399,13 @@ internal static class YouTubeWindowExtension
               hint.textContent = 'Window fullscreen · Esc to return to YouTube';
               document.body.appendChild(hint);
             }
-
             hint.classList.add('wyp-visible');
             window.clearTimeout(hintTimer);
-            hintTimer = window.setTimeout(() => {
-              hint?.classList.remove('wyp-visible');
-            }, 1800);
+            hintTimer = window.setTimeout(() => hint?.classList.remove('wyp-visible'), 1800);
           }
 
           function setWindowFullscreen(enabled) {
-            if (enabled && (!isWatchPage() || !playerElement())) {
-              return;
-            }
-
+            if (enabled && (!isWatchPage() || !playerElement())) return;
             document.documentElement.classList.toggle(rootClass, enabled);
             document.body?.classList.toggle(rootClass, enabled);
             updateFullscreenButtons();
@@ -464,19 +418,13 @@ internal static class YouTubeWindowExtension
             }
           }
 
-          function toggleWindowFullscreen() {
-            setWindowFullscreen(!isWindowFullscreen());
-          }
+          const toggleWindowFullscreen = () => setWindowFullscreen(!isWindowFullscreen());
 
           document.addEventListener('click', event => {
-            const target = event.target instanceof Element
+            const button = event.target instanceof Element
               ? event.target.closest('.ytp-fullscreen-button')
               : null;
-
-            if (!target) {
-              return;
-            }
-
+            if (!button) return;
             event.preventDefault();
             event.stopPropagation();
             event.stopImmediatePropagation();
@@ -485,12 +433,7 @@ internal static class YouTubeWindowExtension
 
           document.addEventListener('dblclick', event => {
             const target = event.target instanceof Element ? event.target : null;
-            const player = target?.closest('.html5-video-player');
-
-            if (!player || target?.closest('.ytp-chrome-controls')) {
-              return;
-            }
-
+            if (!target?.closest('.html5-video-player') || target.closest('.ytp-chrome-controls')) return;
             event.preventDefault();
             event.stopPropagation();
             event.stopImmediatePropagation();
@@ -506,15 +449,9 @@ internal static class YouTubeWindowExtension
               return;
             }
 
-            if (
-              event.key.toLowerCase() === 'f'
-              && !event.ctrlKey
-              && !event.altKey
-              && !event.metaKey
-              && !isEditableTarget(event.target)
-              && isWatchPage()
-              && playerElement()
-            ) {
+            if (event.key.toLowerCase() === 'f'
+              && !event.ctrlKey && !event.altKey && !event.metaKey
+              && !isEditableTarget(event.target) && isWatchPage() && playerElement()) {
               event.preventDefault();
               event.stopPropagation();
               event.stopImmediatePropagation();
@@ -523,38 +460,24 @@ internal static class YouTubeWindowExtension
           }, true);
 
           document.addEventListener('fullscreenchange', () => {
-            if (!document.fullscreenElement) {
-              return;
-            }
-
-            document.exitFullscreen()
-              .catch(() => {})
-              .finally(() => setWindowFullscreen(true));
+            if (!document.fullscreenElement) return;
+            document.exitFullscreen().catch(() => {}).finally(() => setWindowFullscreen(true));
           }, true);
 
           window.addEventListener('resize', () => {
-            if (isWindowFullscreen()) {
-              refreshPlayerSize();
-            }
+            if (isWindowFullscreen()) refreshPlayerSize();
           });
 
           window.addEventListener('yt-navigate-finish', () => {
-            if (!isWatchPage()) {
-              setWindowFullscreen(false);
-            }
-
+            if (!isWatchPage()) setWindowFullscreen(false);
             window.setTimeout(updateFullscreenButtons, 250);
           });
 
           const observer = new MutationObserver(() => {
             updateFullscreenButtons();
-
             if (isWindowFullscreen()) {
-              if (!isWatchPage()) {
-                setWindowFullscreen(false);
-              } else {
-                refreshPlayerSize();
-              }
+              if (!isWatchPage()) setWindowFullscreen(false);
+              else refreshPlayerSize();
             }
           });
 
@@ -563,11 +486,7 @@ internal static class YouTubeWindowExtension
               window.setTimeout(beginObserving, 20);
               return;
             }
-
-            observer.observe(document.documentElement, {
-              childList: true,
-              subtree: true
-            });
+            observer.observe(document.documentElement, { childList: true, subtree: true });
             updateFullscreenButtons();
           };
 
