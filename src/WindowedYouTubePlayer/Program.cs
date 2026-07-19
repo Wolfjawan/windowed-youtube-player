@@ -63,6 +63,7 @@ internal static class BraveYouTubeApp
         };
 
         startInfo.ArgumentList.Add($"--user-data-dir={profileDirectory}");
+        startInfo.ArgumentList.Add($"--disable-extensions-except={extensionDirectory}");
         startInfo.ArgumentList.Add($"--load-extension={extensionDirectory}");
         startInfo.ArgumentList.Add($"--app={StartUrl}");
         startInfo.ArgumentList.Add("--new-window");
@@ -170,7 +171,7 @@ internal static class BraveLocator
         }
         catch
         {
-            // Brave can still launch even if the preferred path cannot be persisted.
+            // Brave can still launch if the preferred path cannot be persisted.
         }
     }
 
@@ -250,7 +251,7 @@ internal static class YouTubeWindowExtension
         {
           "manifest_version": 3,
           "name": "Windowed YouTube Player",
-          "version": "0.2.0",
+          "version": "0.2.1",
           "description": "Makes YouTube fullscreen fill only its resizable Brave app window.",
           "content_scripts": [
             {
@@ -278,53 +279,14 @@ internal static class YouTubeWindowExtension
           background: #000 !important;
         }
 
-        html.wyp-window-fullscreen body > ytd-app {
-          background: #000 !important;
-        }
-
-        html.wyp-window-fullscreen #masthead-container,
-        html.wyp-window-fullscreen #guide,
-        html.wyp-window-fullscreen tp-yt-app-drawer,
-        html.wyp-window-fullscreen ytd-mini-guide-renderer,
-        html.wyp-window-fullscreen #secondary,
-        html.wyp-window-fullscreen #below,
-        html.wyp-window-fullscreen #comments,
-        html.wyp-window-fullscreen #related,
-        html.wyp-window-fullscreen #chat-container,
-        html.wyp-window-fullscreen ytd-live-chat-frame,
-        html.wyp-window-fullscreen ytd-engagement-panel-section-list-renderer,
-        html.wyp-window-fullscreen ytd-popup-container {
-          display: none !important;
-        }
-
-        html.wyp-window-fullscreen ytd-watch-flexy {
+        html.wyp-window-fullscreen #movie_player,
+        html.wyp-window-fullscreen .html5-video-player {
           position: fixed !important;
           inset: 0 !important;
           z-index: 2147483646 !important;
+          box-sizing: border-box !important;
           width: 100vw !important;
           height: 100vh !important;
-          min-width: 0 !important;
-          max-width: none !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          overflow: hidden !important;
-          background: #000 !important;
-        }
-
-        html.wyp-window-fullscreen ytd-watch-flexy #columns,
-        html.wyp-window-fullscreen ytd-watch-flexy #primary,
-        html.wyp-window-fullscreen ytd-watch-flexy #primary-inner,
-        html.wyp-window-fullscreen ytd-watch-flexy #player,
-        html.wyp-window-fullscreen ytd-watch-flexy #player-container-outer,
-        html.wyp-window-fullscreen ytd-watch-flexy #player-container-inner,
-        html.wyp-window-fullscreen ytd-watch-flexy #player-container,
-        html.wyp-window-fullscreen ytd-watch-flexy #movie_player,
-        html.wyp-window-fullscreen ytd-watch-flexy .html5-video-container {
-          position: absolute !important;
-          inset: 0 !important;
-          box-sizing: border-box !important;
-          width: 100% !important;
-          height: 100% !important;
           min-width: 0 !important;
           min-height: 0 !important;
           max-width: none !important;
@@ -335,15 +297,44 @@ internal static class YouTubeWindowExtension
           background: #000 !important;
         }
 
-        html.wyp-window-fullscreen ytd-watch-flexy video.html5-main-video {
+        html.wyp-window-fullscreen #movie_player .html5-video-container,
+        html.wyp-window-fullscreen .html5-video-player .html5-video-container {
           position: absolute !important;
           inset: 0 !important;
           width: 100% !important;
           height: 100% !important;
           max-width: none !important;
           max-height: none !important;
-          object-fit: contain !important;
+          margin: 0 !important;
+          padding: 0 !important;
           transform: none !important;
+          overflow: hidden !important;
+          background: #000 !important;
+        }
+
+        html.wyp-window-fullscreen video.html5-main-video {
+          position: absolute !important;
+          inset: 0 !important;
+          left: 0 !important;
+          top: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+          max-width: none !important;
+          max-height: none !important;
+          margin: 0 !important;
+          transform: none !important;
+          object-fit: contain !important;
+          background: #000 !important;
+        }
+
+        html.wyp-window-fullscreen #movie_player .ytp-chrome-bottom {
+          left: 12px !important;
+          width: calc(100% - 24px) !important;
+        }
+
+        html.wyp-window-fullscreen #movie_player .ytp-gradient-bottom,
+        html.wyp-window-fullscreen #movie_player .ytp-gradient-top {
+          width: 100% !important;
         }
 
         #wyp-window-fullscreen-hint {
@@ -379,6 +370,7 @@ internal static class YouTubeWindowExtension
           const rootClass = 'wyp-window-fullscreen';
           const hintId = 'wyp-window-fullscreen-hint';
           let hintTimer = 0;
+          let resizeFrame = 0;
 
           const playerElement = () =>
             document.querySelector('#movie_player, .html5-video-player');
@@ -408,6 +400,30 @@ internal static class YouTubeWindowExtension
             document.querySelectorAll('.ytp-fullscreen-button').forEach(button => {
               button.setAttribute('title', label);
               button.setAttribute('aria-label', label);
+            });
+          }
+
+          function refreshPlayerSize() {
+            window.cancelAnimationFrame(resizeFrame);
+            resizeFrame = window.requestAnimationFrame(() => {
+              const player = playerElement();
+              if (!player || !isWindowFullscreen()) {
+                return;
+              }
+
+              player.style.setProperty('width', `${window.innerWidth}px`, 'important');
+              player.style.setProperty('height', `${window.innerHeight}px`, 'important');
+
+              const video = player.querySelector('video.html5-main-video');
+              if (video) {
+                video.style.setProperty('width', '100%', 'important');
+                video.style.setProperty('height', '100%', 'important');
+                video.style.setProperty('left', '0', 'important');
+                video.style.setProperty('top', '0', 'important');
+                video.style.setProperty('transform', 'none', 'important');
+              }
+
+              window.dispatchEvent(new Event('resize'));
             });
           }
 
@@ -441,6 +457,9 @@ internal static class YouTubeWindowExtension
             updateFullscreenButtons();
 
             if (enabled) {
+              refreshPlayerSize();
+              window.setTimeout(refreshPlayerSize, 80);
+              window.setTimeout(refreshPlayerSize, 300);
               showHint();
             }
           }
@@ -513,6 +532,12 @@ internal static class YouTubeWindowExtension
               .finally(() => setWindowFullscreen(true));
           }, true);
 
+          window.addEventListener('resize', () => {
+            if (isWindowFullscreen()) {
+              refreshPlayerSize();
+            }
+          });
+
           window.addEventListener('yt-navigate-finish', () => {
             if (!isWatchPage()) {
               setWindowFullscreen(false);
@@ -524,8 +549,12 @@ internal static class YouTubeWindowExtension
           const observer = new MutationObserver(() => {
             updateFullscreenButtons();
 
-            if (isWindowFullscreen() && !isWatchPage()) {
-              setWindowFullscreen(false);
+            if (isWindowFullscreen()) {
+              if (!isWatchPage()) {
+                setWindowFullscreen(false);
+              } else {
+                refreshPlayerSize();
+              }
             }
           });
 
