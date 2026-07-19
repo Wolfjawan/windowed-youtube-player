@@ -3,7 +3,8 @@ name: Build and release Windows app
 on:
   push:
     branches: ["main"]
-  pull_request:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
   workflow_dispatch:
     inputs:
       version:
@@ -25,8 +26,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout trusted main branch
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Set up .NET 8
         uses: actions/setup-dotnet@v4
@@ -69,7 +72,6 @@ jobs:
           if-no-files-found: error
 
       - name: Select release version
-        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
@@ -85,7 +87,6 @@ jobs:
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
 
       - name: Create or update GitHub Release
-        if: github.event_name != 'pull_request'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -101,21 +102,24 @@ jobs:
               artifacts/WindowedYouTubePlayer-win-x64.zip \
               artifacts/WindowedYouTubePlayer-win-x64.sha256 \
               --repo "${{ github.repository }}" \
-              --target "${{ github.sha }}" \
+              --target main \
               --title "Windowed YouTube Player $RELEASE_TAG" \
               --generate-notes
           fi
 
       - name: Report final workflow result
-        if: always() && github.event_name != 'pull_request'
+        if: always()
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          mkdir -p artifacts
           cat > artifacts/workflow-result.md <<EOF
           Status: **${{ job.status }}**
 
           Commit: `${{ github.sha }}`
+
+          Event: `${{ github.event_name }}`
 
           Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
