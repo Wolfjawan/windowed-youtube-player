@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0
+
+- Removed the separate URL-launcher window.
+- Opened one persistent Brave app window directly on the normal YouTube website.
+- Added normal YouTube browsing, search, sign-in, subscriptions, history, playlists, comments and recommendations.
+- Added a dedicated persistent Brave profile for the application.
+- Replaced YouTube physical-monitor fullscreen with window fullscreen.
+- Added window-fullscreen control through YouTube's fullscreen button, the `F` key and video double-click.
+- Added `Esc` to return to normal YouTube browsing.
+
 ## 0.1.1
 
 - Fixed YouTube player Error 153 by serving the embedded player from a loopback HTTP page.
