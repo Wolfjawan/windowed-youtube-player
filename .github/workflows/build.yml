@@ -144,3 +144,25 @@ jobs:
             --repo "${{ github.repository }}" `
             --title "Windows CI failure in run ${{ github.run_number }}" `
             --body-file artifacts/failure-issue.md
+
+      - name: Report final workflow result
+        if: always() && github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $body = @"
+          Status: **${{ job.status }}**
+
+          Commit: `${{ github.sha }}`
+
+          Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          Expected release: https://github.com/${{ github.repository }}/releases/tag/v0.1.0
+          "@
+
+          $body | Set-Content artifacts/workflow-result.md
+          gh issue create `
+            --repo "${{ github.repository }}" `
+            --title "Windows release verification run ${{ github.run_number }}: ${{ job.status }}" `
+            --body-file artifacts/workflow-result.md
