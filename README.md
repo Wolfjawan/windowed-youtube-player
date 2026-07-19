@@ -41,6 +41,20 @@ dotnet run --project .\src\WindowedYouTubePlayer\WindowedYouTubePlayer.csproj
 
 The output is written to `artifacts\win-x64`.
 
+## Automated Windows builds and releases
+
+The GitHub Actions workflow builds the app on pushes to `main`, pull requests, version tags, and manual runs.
+
+Every successful run uploads a self-contained `win-x64` ZIP as a workflow artifact. A GitHub Release is created when either:
+
+- a tag beginning with `v` is pushed, such as `v0.1.0`; or
+- **Run workflow** is selected on the Actions page and a release version is entered.
+
+The release contains:
+
+- `WindowedYouTubePlayer-win-x64.zip`
+- `WindowedYouTubePlayer-win-x64.sha256`
+
 ## Usage
 
 1. Paste a YouTube video or playlist URL.
