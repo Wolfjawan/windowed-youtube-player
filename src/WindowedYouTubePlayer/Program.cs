@@ -72,8 +72,11 @@ internal static class BraveYouTubeApp
         startInfo.ArgumentList.Add("--disable-session-crashed-bubble");
         startInfo.ArgumentList.Add("--disable-background-mode");
 
-        Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Brave did not return a running process.");
+        Process? process = Process.Start(startInfo);
+        if (process is null)
+        {
+            throw new InvalidOperationException("Brave did not return a running process.");
+        }
     }
 
     private static string? SelectBraveExecutable()
