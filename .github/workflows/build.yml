@@ -12,14 +12,14 @@ on:
         required: true
         default: v0.1.0
         type: string
-      create_release:
-        description: Create a GitHub Release
-        required: true
-        default: true
-        type: boolean
 
 permissions:
   contents: write
+  issues: write
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -29,49 +29,70 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up .NET
+      - name: Set up .NET 8
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
 
-      - name: Restore
-        run: dotnet restore WindowedYouTubePlayer.sln
-
-      - name: Build
-        run: dotnet build WindowedYouTubePlayer.sln --configuration Release --no-restore
-
-      - name: Publish self-contained app
-        shell: pwsh
-        run: ./scripts/publish.ps1
-
-      - name: Package release ZIP
+      - name: Publish self-contained Windows app
+        id: publish
         shell: pwsh
         run: |
-          Compress-Archive -Path artifacts/win-x64/* -DestinationPath artifacts/WindowedYouTubePlayer-win-x64.zip -Force
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          dotnet publish src/WindowedYouTubePlayer/WindowedYouTubePlayer.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:ContinuousIntegrationBuild=true `
+            --output artifacts/win-x64 2>&1 | Tee-Object -FilePath artifacts/build.log
+
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Package Windows build
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path artifacts/win-x64/* `
+            -DestinationPath artifacts/WindowedYouTubePlayer-win-x64.zip `
+            -Force
+
           $hash = (Get-FileHash artifacts/WindowedYouTubePlayer-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  WindowedYouTubePlayer-win-x64.zip" | Set-Content artifacts/WindowedYouTubePlayer-win-x64.sha256
 
-      - name: Upload Windows build artifact
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: WindowedYouTubePlayer-win-x64
           path: |
             artifacts/WindowedYouTubePlayer-win-x64.zip
             artifacts/WindowedYouTubePlayer-win-x64.sha256
+            artifacts/build.log
           if-no-files-found: error
 
-      - name: Select release tag
-        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
+      - name: Select release version
+        if: github.event_name != 'pull_request'
         shell: pwsh
         run: |
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            "RELEASE_TAG=${{ inputs.version }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+            $tag = "${{ inputs.version }}"
+          } elseif ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
           } else {
-            "RELEASE_TAG=${{ github.ref_name }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+            $tag = "v0.1.${{ github.run_number }}"
           }
 
+          if (-not $tag.StartsWith("v")) {
+            $tag = "v$tag"
+          }
+
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
+        if: github.event_name != 'pull_request'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -82,4 +103,33 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "Windowed YouTube Player $env:RELEASE_TAG" `
-            --generate-notes
+            --generate-notes `
+            --latest
+
+      - name: Report build failure
+        if: failure() && steps.publish.outcome == 'failure'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $log = if (Test-Path artifacts/build.log) {
+            (Get-Content artifacts/build.log -Tail 180) -join "`n"
+          } else {
+            "The publish step failed before a build log was created."
+          }
+
+          $body = @"
+          The Windows build failed in workflow run ${{ github.run_id }}.
+
+          Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          ```text
+          $log
+          ```
+          "@
+
+          $body | Set-Content artifacts/failure-issue.md
+          gh issue create `
+            --repo "${{ github.repository }}" `
+            --title "Windows CI failure in run ${{ github.run_number }}" `
+            --body-file artifacts/failure-issue.md
