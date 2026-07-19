@@ -6,6 +6,17 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, for example v0.1.0
+        required: true
+        default: v0.1.0
+        type: string
+      create_release:
+        description: Create a GitHub Release
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: write
@@ -49,15 +60,26 @@ jobs:
             artifacts/WindowedYouTubePlayer-win-x64.sha256
           if-no-files-found: error
 
+      - name: Select release tag
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            "RELEASE_TAG=${{ inputs.version }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+          } else {
+            "RELEASE_TAG=${{ github.ref_name }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" `
+          gh release create "$env:RELEASE_TAG" `
             artifacts/WindowedYouTubePlayer-win-x64.zip `
             artifacts/WindowedYouTubePlayer-win-x64.sha256 `
             --repo "${{ github.repository }}" `
-            --title "Windowed YouTube Player ${{ github.ref_name }}" `
+            --target "${{ github.sha }}" `
+            --title "Windowed YouTube Player $env:RELEASE_TAG" `
             --generate-notes
