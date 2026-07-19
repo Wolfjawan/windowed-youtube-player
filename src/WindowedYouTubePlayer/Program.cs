@@ -1,9 +1,5 @@
 using System.Diagnostics;
-using System.Drawing;
-using System.Net;
-using System.Net.Sockets;
 using System.Text;
-using System.Text.RegularExpressions;
 using Microsoft.Win32;
 using System.Windows.Forms;
 
@@ -15,595 +11,535 @@ internal static class Program
     private static void Main()
     {
         ApplicationConfiguration.Initialize();
-        Application.Run(new MainForm());
-    }
-}
-
-internal sealed class MainForm : Form
-{
-    private readonly TextBox _urlTextBox = new();
-    private readonly TextBox _bravePathTextBox = new();
-    private readonly NumericUpDown _widthInput = new();
-    private readonly NumericUpDown _heightInput = new();
-    private readonly CheckBox _autoplayCheckBox = new();
-    private readonly Label _statusLabel = new();
-    private readonly List<LoopbackPlayerHost> _playerHosts = [];
-
-    public MainForm()
-    {
-        Text = "Windowed YouTube Player";
-        StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(700, 390);
-        Size = new Size(790, 440);
-        Font = new Font("Segoe UI", 10F);
-        AutoScaleMode = AutoScaleMode.Dpi;
-
-        BuildLayout();
-
-        _widthInput.Value = 1280;
-        _heightInput.Value = 720;
-        _autoplayCheckBox.Checked = true;
-        _bravePathTextBox.Text = FindBrave() ?? "Brave was not found. Click Browse…";
-
-        FormClosed += (_, _) =>
-        {
-            foreach (LoopbackPlayerHost host in _playerHosts)
-            {
-                host.Dispose();
-            }
-
-            _playerHosts.Clear();
-        };
-    }
-
-    private void BuildLayout()
-    {
-        TableLayoutPanel root = new()
-        {
-            Dock = DockStyle.Fill,
-            Padding = new Padding(20),
-            ColumnCount = 1,
-            RowCount = 7
-        };
-
-        for (int index = 0; index < 6; index++)
-        {
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        }
-
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-
-        Label title = new()
-        {
-            AutoSize = true,
-            Text = "Windowed YouTube Player",
-            Font = new Font(Font.FontFamily, 18F, FontStyle.Bold),
-            Margin = new Padding(0, 0, 0, 6)
-        };
-        root.Controls.Add(title);
-
-        Label explanation = new()
-        {
-            AutoSize = true,
-            MaximumSize = new Size(720, 0),
-            Text = "Paste a YouTube link and open it in a clean, resizable Brave app window. The video stays inside that window instead of taking over your whole monitor.",
-            Margin = new Padding(0, 0, 0, 16)
-        };
-        root.Controls.Add(explanation);
-
-        TableLayoutPanel urlRow = CreateInputRow();
-        _urlTextBox.Dock = DockStyle.Fill;
-        _urlTextBox.PlaceholderText = "https://www.youtube.com/watch?v=…";
-        _urlTextBox.Margin = new Padding(0, 0, 8, 0);
-        _urlTextBox.KeyDown += (_, eventArgs) =>
-        {
-            if (eventArgs.KeyCode == Keys.Enter)
-            {
-                eventArgs.SuppressKeyPress = true;
-                LaunchPlayer();
-            }
-        };
-
-        Button pasteButton = new() { Text = "Paste", AutoSize = true };
-        pasteButton.Click += (_, _) =>
-        {
-            if (Clipboard.ContainsText())
-            {
-                _urlTextBox.Text = Clipboard.GetText().Trim();
-            }
-        };
-
-        urlRow.Controls.Add(_urlTextBox, 0, 0);
-        urlRow.Controls.Add(pasteButton, 1, 0);
-        root.Controls.Add(urlRow);
-
-        FlowLayoutPanel sizeRow = new()
-        {
-            AutoSize = true,
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.LeftToRight,
-            Margin = new Padding(0, 14, 0, 0)
-        };
-
-        ConfigureDimensionInput(_widthInput, 480, 7680);
-        ConfigureDimensionInput(_heightInput, 270, 4320);
-
-        sizeRow.Controls.Add(new Label { Text = "Width", AutoSize = true, Margin = new Padding(0, 7, 7, 0) });
-        sizeRow.Controls.Add(_widthInput);
-        sizeRow.Controls.Add(new Label { Text = "Height", AutoSize = true, Margin = new Padding(16, 7, 7, 0) });
-        sizeRow.Controls.Add(_heightInput);
-
-        Button hdButton = new() { Text = "1280 × 720", AutoSize = true, Margin = new Padding(16, 0, 0, 0) };
-        hdButton.Click += (_, _) => SetDimensions(1280, 720);
-        sizeRow.Controls.Add(hdButton);
-
-        Button fullHdButton = new() { Text = "1920 × 1080", AutoSize = true };
-        fullHdButton.Click += (_, _) => SetDimensions(1920, 1080);
-        sizeRow.Controls.Add(fullHdButton);
-
-        _autoplayCheckBox.Text = "Autoplay";
-        _autoplayCheckBox.AutoSize = true;
-        _autoplayCheckBox.Margin = new Padding(16, 5, 0, 0);
-        sizeRow.Controls.Add(_autoplayCheckBox);
-        root.Controls.Add(sizeRow);
-
-        TableLayoutPanel braveRow = CreateInputRow();
-        braveRow.Margin = new Padding(0, 14, 0, 0);
-        _bravePathTextBox.Dock = DockStyle.Fill;
-        _bravePathTextBox.ReadOnly = true;
-        _bravePathTextBox.Margin = new Padding(0, 0, 8, 0);
-
-        Button browseButton = new() { Text = "Browse…", AutoSize = true };
-        browseButton.Click += (_, _) => BrowseForBrave();
-        braveRow.Controls.Add(_bravePathTextBox, 0, 0);
-        braveRow.Controls.Add(browseButton, 1, 0);
-        root.Controls.Add(braveRow);
-
-        Button launchButton = new()
-        {
-            Text = "Launch player",
-            AutoSize = true,
-            Padding = new Padding(14, 6, 14, 6),
-            Margin = new Padding(0, 18, 0, 0)
-        };
-        launchButton.Click += (_, _) => LaunchPlayer();
-        root.Controls.Add(launchButton);
-        AcceptButton = launchButton;
-
-        _statusLabel.AutoSize = true;
-        _statusLabel.ForeColor = SystemColors.GrayText;
-        _statusLabel.Text = "Brave app mode removes tabs, the address bar, comments and recommendations.";
-        _statusLabel.Margin = new Padding(0, 18, 0, 0);
-        root.Controls.Add(_statusLabel);
-
-        Controls.Add(root);
-    }
-
-    private void LaunchPlayer()
-    {
-        if (!TryCreatePlayerUrl(_urlTextBox.Text, _autoplayCheckBox.Checked, out string? embedUrl, out string error))
-        {
-            SetStatus(error, true);
-            return;
-        }
-
-        string? bravePath = FindBrave(_bravePathTextBox.Text);
-        if (bravePath is null)
-        {
-            SetStatus("Brave was not found. Click Browse and select brave.exe.", true);
-            return;
-        }
-
-        LoopbackPlayerHost? host = null;
 
         try
         {
-            host = LoopbackPlayerHost.Start(embedUrl!);
-            _playerHosts.Add(host);
-
-            ProcessStartInfo startInfo = new(bravePath)
-            {
-                UseShellExecute = false
-            };
-
-            startInfo.ArgumentList.Add($"--app={host.PlayerUrl}");
-            startInfo.ArgumentList.Add("--new-window");
-            startInfo.ArgumentList.Add($"--window-size={(int)_widthInput.Value},{(int)_heightInput.Value}");
-            startInfo.ArgumentList.Add("--disable-session-crashed-bubble");
-
-            Process.Start(startInfo);
-            SetStatus("Player opened through the local host page. Error 153 should no longer occur.", false);
+            BraveYouTubeApp.Launch();
         }
         catch (Exception exception)
         {
-            if (host is not null)
-            {
-                _playerHosts.Remove(host);
-                host.Dispose();
-            }
-
-            SetStatus($"Could not start the player: {exception.Message}", true);
+            MessageBox.Show(
+                $"Windowed YouTube Player could not start.\n\n{exception.Message}",
+                "Windowed YouTube Player",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
         }
     }
+}
 
-    private void BrowseForBrave()
+internal static class BraveYouTubeApp
+{
+    private const string StartUrl = "https://www.youtube.com/";
+    private const string ProductFolderName = "WindowedYouTubePlayer";
+    private const string BraveExecutableName = "brave.exe";
+
+    public static void Launch()
+    {
+        string? bravePath = BraveLocator.Find();
+        if (bravePath is null)
+        {
+            bravePath = SelectBraveExecutable();
+            if (bravePath is null)
+            {
+                return;
+            }
+
+            BraveLocator.SavePreferredPath(bravePath);
+        }
+
+        string appDataDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            ProductFolderName);
+        string profileDirectory = Path.Combine(appDataDirectory, "BraveProfile");
+        string extensionDirectory = Path.Combine(appDataDirectory, "WindowFullscreenExtension");
+
+        Directory.CreateDirectory(profileDirectory);
+        YouTubeWindowExtension.Install(extensionDirectory);
+
+        ProcessStartInfo startInfo = new(bravePath)
+        {
+            UseShellExecute = false,
+            WorkingDirectory = Path.GetDirectoryName(bravePath) ?? Environment.CurrentDirectory
+        };
+
+        startInfo.ArgumentList.Add($"--user-data-dir={profileDirectory}");
+        startInfo.ArgumentList.Add($"--load-extension={extensionDirectory}");
+        startInfo.ArgumentList.Add($"--app={StartUrl}");
+        startInfo.ArgumentList.Add("--new-window");
+        startInfo.ArgumentList.Add("--window-size=1280,720");
+        startInfo.ArgumentList.Add("--no-first-run");
+        startInfo.ArgumentList.Add("--no-default-browser-check");
+        startInfo.ArgumentList.Add("--disable-session-crashed-bubble");
+        startInfo.ArgumentList.Add("--disable-background-mode");
+
+        Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Brave did not return a running process.");
+    }
+
+    private static string? SelectBraveExecutable()
     {
         using OpenFileDialog dialog = new()
         {
             Title = "Select Brave Browser",
-            Filter = "Brave Browser|brave.exe|Applications|*.exe",
+            Filter = "Brave Browser (brave.exe)|brave.exe|Applications (*.exe)|*.exe",
             CheckFileExists = true,
-            FileName = "brave.exe"
+            FileName = BraveExecutableName
         };
 
-        if (dialog.ShowDialog(this) != DialogResult.OK)
+        if (dialog.ShowDialog() != DialogResult.OK)
         {
-            return;
+            return null;
         }
 
-        if (!string.Equals(Path.GetFileName(dialog.FileName), "brave.exe", StringComparison.OrdinalIgnoreCase))
+        if (!BraveLocator.IsBraveExecutable(dialog.FileName))
         {
-            SetStatus("Please select Brave's brave.exe file.", true);
-            return;
+            MessageBox.Show(
+                "Please select Brave Browser's brave.exe file.",
+                "Windowed YouTube Player",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return null;
         }
 
-        _bravePathTextBox.Text = dialog.FileName;
-        SetStatus("Brave selected.", false);
+        return Path.GetFullPath(dialog.FileName);
     }
+}
 
-    private static bool TryCreatePlayerUrl(string input, bool autoplay, out string? playerUrl, out string error)
+internal static class BraveLocator
+{
+    private const string ProductFolderName = "WindowedYouTubePlayer";
+    private const string BraveExecutableName = "brave.exe";
+
+    private static string PreferredPathFile => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        ProductFolderName,
+        "brave-path.txt");
+
+    public static string? Find()
     {
-        playerUrl = null;
-        error = string.Empty;
-        input = input.Trim();
-
-        if (string.IsNullOrWhiteSpace(input))
+        string? savedPath = ReadPreferredPath();
+        if (IsBraveExecutable(savedPath))
         {
-            error = "Paste a YouTube URL first.";
-            return false;
+            return Path.GetFullPath(savedPath!);
         }
 
-        string? videoId = null;
-        string? playlistId = null;
-
-        if (Regex.IsMatch(input, "^[A-Za-z0-9_-]{11}$", RegexOptions.CultureInvariant))
+        foreach (string candidate in StandardCandidates())
         {
-            videoId = input;
-        }
-        else
-        {
-            string normalized = input.Contains("://", StringComparison.Ordinal) ? input : $"https://{input}";
-            if (!Uri.TryCreate(normalized, UriKind.Absolute, out Uri? uri))
+            if (IsBraveExecutable(candidate))
             {
-                error = "That is not a valid URL.";
-                return false;
-            }
-
-            string host = uri.Host.ToLowerInvariant();
-            bool isYouTube = host is "youtube.com" or "www.youtube.com" or "m.youtube.com" or "music.youtube.com"
-                             || host.EndsWith(".youtube.com", StringComparison.OrdinalIgnoreCase);
-            bool isShortHost = host is "youtu.be" or "www.youtu.be";
-
-            if (!isYouTube && !isShortHost)
-            {
-                error = "Only youtube.com and youtu.be links are supported.";
-                return false;
-            }
-
-            Dictionary<string, string> query = ParseQuery(uri.Query);
-            query.TryGetValue("list", out playlistId);
-
-            string[] segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-            if (isShortHost && segments.Length > 0)
-            {
-                videoId = segments[0];
-            }
-            else if (segments.Length >= 2 && (segments[0] == "shorts" || segments[0] == "embed" || segments[0] == "live"))
-            {
-                videoId = segments[1];
-            }
-            else if (query.TryGetValue("v", out string? value))
-            {
-                videoId = value;
+                SavePreferredPath(candidate);
+                return candidate;
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(videoId)
-            && !Regex.IsMatch(videoId, "^[A-Za-z0-9_-]{11}$", RegexOptions.CultureInvariant))
+        foreach (RegistryHive hive in new[] { RegistryHive.CurrentUser, RegistryHive.LocalMachine })
         {
-            error = "The YouTube video ID is invalid.";
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(videoId) && string.IsNullOrWhiteSpace(playlistId))
-        {
-            error = "The link does not contain a video or playlist ID.";
-            return false;
-        }
-
-        string baseUrl = string.IsNullOrWhiteSpace(videoId)
-            ? "https://www.youtube.com/embed/videoseries"
-            : $"https://www.youtube.com/embed/{Uri.EscapeDataString(videoId)}";
-
-        List<string> parameters =
-        [
-            $"autoplay={(autoplay ? 1 : 0)}",
-            "controls=1",
-            "enablejsapi=1",
-            "fs=0",
-            "playsinline=1",
-            "rel=0"
-        ];
-
-        if (!string.IsNullOrWhiteSpace(playlistId))
-        {
-            parameters.Add($"list={Uri.EscapeDataString(playlistId)}");
-        }
-
-        playerUrl = $"{baseUrl}?{string.Join("&", parameters)}";
-        return true;
-    }
-
-    private static Dictionary<string, string> ParseQuery(string query)
-    {
-        Dictionary<string, string> result = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (string pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            string[] parts = pair.Split('=', 2);
-            string key = Uri.UnescapeDataString(parts[0].Replace('+', ' '));
-            string value = parts.Length > 1
-                ? Uri.UnescapeDataString(parts[1].Replace('+', ' '))
-                : string.Empty;
-            result[key] = value;
-        }
-
-        return result;
-    }
-
-    private static string? FindBrave(string? preferredPath = null)
-    {
-        if (IsBrave(preferredPath))
-        {
-            return Path.GetFullPath(preferredPath!);
-        }
-
-        string[] candidates =
-        [
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BraveSoftware", "Brave-Browser", "Application", "brave.exe")
-        ];
-
-        string? candidate = candidates.FirstOrDefault(IsBrave);
-        if (candidate is not null)
-        {
-            return candidate;
-        }
-
-        foreach (RegistryKey root in new[] { Registry.CurrentUser, Registry.LocalMachine })
-        {
-            try
+            foreach (RegistryView view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
             {
-                using RegistryKey? key = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\brave.exe");
-                string? registeredPath = key?.GetValue(null) as string;
-                if (IsBrave(registeredPath))
+                string? registeredPath = ReadRegisteredPath(hive, view);
+                if (IsBraveExecutable(registeredPath))
                 {
+                    SavePreferredPath(registeredPath!);
                     return registeredPath;
                 }
-            }
-            catch
-            {
-                // Continue to the next installation location.
             }
         }
 
         return null;
     }
 
-    private static bool IsBrave(string? path) =>
+    public static bool IsBraveExecutable(string? path) =>
         !string.IsNullOrWhiteSpace(path)
         && File.Exists(path)
-        && string.Equals(Path.GetFileName(path), "brave.exe", StringComparison.OrdinalIgnoreCase);
+        && string.Equals(Path.GetFileName(path), BraveExecutableName, StringComparison.OrdinalIgnoreCase);
 
-    private static TableLayoutPanel CreateInputRow()
-    {
-        TableLayoutPanel row = new()
-        {
-            AutoSize = true,
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            Margin = Padding.Empty
-        };
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        return row;
-    }
-
-    private static void ConfigureDimensionInput(NumericUpDown input, int minimum, int maximum)
-    {
-        input.Minimum = minimum;
-        input.Maximum = maximum;
-        input.Increment = 10;
-        input.Width = 105;
-    }
-
-    private void SetDimensions(int width, int height)
-    {
-        _widthInput.Value = width;
-        _heightInput.Value = height;
-    }
-
-    private void SetStatus(string message, bool error)
-    {
-        _statusLabel.Text = message;
-        _statusLabel.ForeColor = error ? Color.Firebrick : SystemColors.GrayText;
-    }
-}
-
-internal sealed class LoopbackPlayerHost : IDisposable
-{
-    private readonly TcpListener _listener;
-    private readonly CancellationTokenSource _cancellation = new();
-    private readonly byte[] _htmlBytes;
-    private readonly Task _acceptLoop;
-    private bool _disposed;
-
-    private LoopbackPlayerHost(TcpListener listener, string origin, string embedUrl)
-    {
-        _listener = listener;
-        PlayerUrl = $"{origin}/";
-
-        string separator = embedUrl.Contains('?') ? "&" : "?";
-        string identifiedEmbedUrl =
-            $"{embedUrl}{separator}origin={Uri.EscapeDataString(origin)}&widget_referrer={Uri.EscapeDataString(PlayerUrl)}";
-
-        string encodedEmbedUrl = WebUtility.HtmlEncode(identifiedEmbedUrl);
-        string html = $$"""
-            <!doctype html>
-            <html lang="en">
-            <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1">
-              <meta name="referrer" content="strict-origin-when-cross-origin">
-              <title>Windowed YouTube Player</title>
-              <style>
-                html, body {
-                  width: 100%;
-                  height: 100%;
-                  margin: 0;
-                  overflow: hidden;
-                  background: #000;
-                }
-
-                iframe {
-                  display: block;
-                  width: 100vw;
-                  height: 100vh;
-                  border: 0;
-                  background: #000;
-                }
-              </style>
-            </head>
-            <body>
-              <iframe
-                src="{{encodedEmbedUrl}}"
-                title="YouTube video player"
-                referrerpolicy="strict-origin-when-cross-origin"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share">
-              </iframe>
-            </body>
-            </html>
-            """;
-
-        _htmlBytes = Encoding.UTF8.GetBytes(html);
-        _acceptLoop = Task.Run(AcceptLoopAsync);
-    }
-
-    public string PlayerUrl { get; }
-
-    public static LoopbackPlayerHost Start(string embedUrl)
-    {
-        TcpListener listener = new(IPAddress.Loopback, 0);
-        listener.Start();
-
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        string origin = $"http://127.0.0.1:{port}";
-
-        return new LoopbackPlayerHost(listener, origin, embedUrl);
-    }
-
-    private async Task AcceptLoopAsync()
+    public static void SavePreferredPath(string path)
     {
         try
         {
-            while (!_cancellation.IsCancellationRequested)
+            string? directory = Path.GetDirectoryName(PreferredPathFile);
+            if (!string.IsNullOrWhiteSpace(directory))
             {
-                TcpClient client = await _listener.AcceptTcpClientAsync(_cancellation.Token);
-                _ = HandleClientAsync(client);
+                Directory.CreateDirectory(directory);
             }
+
+            File.WriteAllText(PreferredPathFile, Path.GetFullPath(path), new UTF8Encoding(false));
         }
-        catch (OperationCanceledException)
+        catch
         {
-            // Normal shutdown.
-        }
-        catch (ObjectDisposedException)
-        {
-            // Normal shutdown.
+            // Brave can still launch even if the preferred path cannot be persisted.
         }
     }
 
-    private async Task HandleClientAsync(TcpClient client)
+    private static string? ReadPreferredPath()
     {
-        using (client)
+        try
         {
-            try
-            {
-                await using NetworkStream stream = client.GetStream();
-                using StreamReader reader = new(stream, Encoding.ASCII, false, 1024, leaveOpen: true);
-
-                string? requestLine = await reader.ReadLineAsync(_cancellation.Token);
-                if (string.IsNullOrWhiteSpace(requestLine))
-                {
-                    return;
-                }
-
-                while (true)
-                {
-                    string? headerLine = await reader.ReadLineAsync(_cancellation.Token);
-                    if (string.IsNullOrEmpty(headerLine))
-                    {
-                        break;
-                    }
-                }
-
-                bool faviconRequest = requestLine.StartsWith("GET /favicon.ico ", StringComparison.OrdinalIgnoreCase);
-                byte[] body = faviconRequest ? [] : _htmlBytes;
-                string status = faviconRequest ? "204 No Content" : "200 OK";
-                string contentType = faviconRequest ? "text/plain" : "text/html; charset=utf-8";
-
-                string headers =
-                    $"HTTP/1.1 {status}\r\n" +
-                    $"Content-Type: {contentType}\r\n" +
-                    $"Content-Length: {body.Length}\r\n" +
-                    "Cache-Control: no-store, no-cache, must-revalidate\r\n" +
-                    "Pragma: no-cache\r\n" +
-                    "Referrer-Policy: strict-origin-when-cross-origin\r\n" +
-                    "X-Content-Type-Options: nosniff\r\n" +
-                    "Connection: close\r\n\r\n";
-
-                byte[] headerBytes = Encoding.ASCII.GetBytes(headers);
-                await stream.WriteAsync(headerBytes, _cancellation.Token);
-
-                if (body.Length > 0)
-                {
-                    await stream.WriteAsync(body, _cancellation.Token);
-                }
-
-                await stream.FlushAsync(_cancellation.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                // Host is shutting down.
-            }
-            catch (IOException)
-            {
-                // The browser disconnected before the response completed.
-            }
+            return File.Exists(PreferredPathFile)
+                ? File.ReadAllText(PreferredPathFile).Trim()
+                : null;
+        }
+        catch
+        {
+            return null;
         }
     }
 
-    public void Dispose()
+    private static IEnumerable<string> StandardCandidates()
     {
-        if (_disposed)
+        string[] roots =
+        [
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)
+        ];
+
+        foreach (string root in roots.Where(root => !string.IsNullOrWhiteSpace(root)))
         {
+            yield return Path.Combine(
+                root,
+                "BraveSoftware",
+                "Brave-Browser",
+                "Application",
+                BraveExecutableName);
+        }
+    }
+
+    private static string? ReadRegisteredPath(RegistryHive hive, RegistryView view)
+    {
+        try
+        {
+            using RegistryKey baseKey = RegistryKey.OpenBaseKey(hive, view);
+            using RegistryKey? key = baseKey.OpenSubKey(
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\brave.exe");
+            return key?.GetValue(null) as string;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+}
+
+internal static class YouTubeWindowExtension
+{
+    private static readonly UTF8Encoding Utf8WithoutBom = new(false);
+
+    public static void Install(string extensionDirectory)
+    {
+        Directory.CreateDirectory(extensionDirectory);
+
+        File.WriteAllText(
+            Path.Combine(extensionDirectory, "manifest.json"),
+            Manifest,
+            Utf8WithoutBom);
+        File.WriteAllText(
+            Path.Combine(extensionDirectory, "content.css"),
+            ContentCss,
+            Utf8WithoutBom);
+        File.WriteAllText(
+            Path.Combine(extensionDirectory, "content.js"),
+            ContentScript,
+            Utf8WithoutBom);
+    }
+
+    private const string Manifest = """
+        {
+          "manifest_version": 3,
+          "name": "Windowed YouTube Player",
+          "version": "0.2.0",
+          "description": "Makes YouTube fullscreen fill only its resizable Brave app window.",
+          "content_scripts": [
+            {
+              "matches": [
+                "https://www.youtube.com/*",
+                "https://youtube.com/*",
+                "https://m.youtube.com/*"
+              ],
+              "css": ["content.css"],
+              "js": ["content.js"],
+              "run_at": "document_start",
+              "all_frames": false
+            }
+          ]
+        }
+        """;
+
+    private const string ContentCss = """
+        html.wyp-window-fullscreen,
+        html.wyp-window-fullscreen body {
+          width: 100% !important;
+          height: 100% !important;
+          margin: 0 !important;
+          overflow: hidden !important;
+          background: #000 !important;
+        }
+
+        html.wyp-window-fullscreen body > ytd-app {
+          background: #000 !important;
+        }
+
+        html.wyp-window-fullscreen #masthead-container,
+        html.wyp-window-fullscreen #guide,
+        html.wyp-window-fullscreen tp-yt-app-drawer,
+        html.wyp-window-fullscreen ytd-mini-guide-renderer,
+        html.wyp-window-fullscreen #secondary,
+        html.wyp-window-fullscreen #below,
+        html.wyp-window-fullscreen #comments,
+        html.wyp-window-fullscreen #related,
+        html.wyp-window-fullscreen #chat-container,
+        html.wyp-window-fullscreen ytd-live-chat-frame,
+        html.wyp-window-fullscreen ytd-engagement-panel-section-list-renderer,
+        html.wyp-window-fullscreen ytd-popup-container {
+          display: none !important;
+        }
+
+        html.wyp-window-fullscreen ytd-watch-flexy {
+          position: fixed !important;
+          inset: 0 !important;
+          z-index: 2147483646 !important;
+          width: 100vw !important;
+          height: 100vh !important;
+          min-width: 0 !important;
+          max-width: none !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          overflow: hidden !important;
+          background: #000 !important;
+        }
+
+        html.wyp-window-fullscreen ytd-watch-flexy #columns,
+        html.wyp-window-fullscreen ytd-watch-flexy #primary,
+        html.wyp-window-fullscreen ytd-watch-flexy #primary-inner,
+        html.wyp-window-fullscreen ytd-watch-flexy #player,
+        html.wyp-window-fullscreen ytd-watch-flexy #player-container-outer,
+        html.wyp-window-fullscreen ytd-watch-flexy #player-container-inner,
+        html.wyp-window-fullscreen ytd-watch-flexy #player-container,
+        html.wyp-window-fullscreen ytd-watch-flexy #movie_player,
+        html.wyp-window-fullscreen ytd-watch-flexy .html5-video-container {
+          position: absolute !important;
+          inset: 0 !important;
+          box-sizing: border-box !important;
+          width: 100% !important;
+          height: 100% !important;
+          min-width: 0 !important;
+          min-height: 0 !important;
+          max-width: none !important;
+          max-height: none !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          transform: none !important;
+          background: #000 !important;
+        }
+
+        html.wyp-window-fullscreen ytd-watch-flexy video.html5-main-video {
+          position: absolute !important;
+          inset: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+          max-width: none !important;
+          max-height: none !important;
+          object-fit: contain !important;
+          transform: none !important;
+        }
+
+        #wyp-window-fullscreen-hint {
+          position: fixed;
+          left: 50%;
+          bottom: 76px;
+          z-index: 2147483647;
+          transform: translateX(-50%);
+          padding: 9px 14px;
+          border-radius: 18px;
+          color: #fff;
+          background: rgba(20, 20, 20, 0.88);
+          box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+          font: 500 13px/1.2 Arial, sans-serif;
+          pointer-events: none;
+          opacity: 0;
+          transition: opacity 140ms ease;
+        }
+
+        #wyp-window-fullscreen-hint.wyp-visible {
+          opacity: 1;
+        }
+        """;
+
+    private const string ContentScript = """
+        (() => {
+          'use strict';
+
+          if (window.top !== window.self) {
             return;
-        }
+          }
 
-        _disposed = true;
-        _cancellation.Cancel();
-        _listener.Stop();
-        _cancellation.Dispose();
-    }
+          const rootClass = 'wyp-window-fullscreen';
+          const hintId = 'wyp-window-fullscreen-hint';
+          let hintTimer = 0;
+
+          const playerElement = () =>
+            document.querySelector('#movie_player, .html5-video-player');
+
+          const isWatchPage = () =>
+            location.pathname === '/watch'
+            || location.pathname.startsWith('/live/')
+            || location.pathname.startsWith('/shorts/');
+
+          const isEditableTarget = target => {
+            if (!(target instanceof Element)) {
+              return false;
+            }
+
+            return target.matches('input, textarea, select, [contenteditable="true"]')
+              || Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+          };
+
+          const isWindowFullscreen = () =>
+            document.documentElement.classList.contains(rootClass);
+
+          function updateFullscreenButtons() {
+            const label = isWindowFullscreen()
+              ? 'Exit window fullscreen (Esc)'
+              : 'Fill this window (F)';
+
+            document.querySelectorAll('.ytp-fullscreen-button').forEach(button => {
+              button.setAttribute('title', label);
+              button.setAttribute('aria-label', label);
+            });
+          }
+
+          function showHint() {
+            if (!document.body) {
+              return;
+            }
+
+            let hint = document.getElementById(hintId);
+            if (!hint) {
+              hint = document.createElement('div');
+              hint.id = hintId;
+              hint.textContent = 'Window fullscreen · Esc to return to YouTube';
+              document.body.appendChild(hint);
+            }
+
+            hint.classList.add('wyp-visible');
+            window.clearTimeout(hintTimer);
+            hintTimer = window.setTimeout(() => {
+              hint?.classList.remove('wyp-visible');
+            }, 1800);
+          }
+
+          function setWindowFullscreen(enabled) {
+            if (enabled && (!isWatchPage() || !playerElement())) {
+              return;
+            }
+
+            document.documentElement.classList.toggle(rootClass, enabled);
+            document.body?.classList.toggle(rootClass, enabled);
+            updateFullscreenButtons();
+
+            if (enabled) {
+              showHint();
+            }
+          }
+
+          function toggleWindowFullscreen() {
+            setWindowFullscreen(!isWindowFullscreen());
+          }
+
+          document.addEventListener('click', event => {
+            const target = event.target instanceof Element
+              ? event.target.closest('.ytp-fullscreen-button')
+              : null;
+
+            if (!target) {
+              return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+            toggleWindowFullscreen();
+          }, true);
+
+          document.addEventListener('dblclick', event => {
+            const target = event.target instanceof Element ? event.target : null;
+            const player = target?.closest('.html5-video-player');
+
+            if (!player || target?.closest('.ytp-chrome-controls')) {
+              return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+            toggleWindowFullscreen();
+          }, true);
+
+          document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && isWindowFullscreen()) {
+              event.preventDefault();
+              event.stopPropagation();
+              event.stopImmediatePropagation();
+              setWindowFullscreen(false);
+              return;
+            }
+
+            if (
+              event.key.toLowerCase() === 'f'
+              && !event.ctrlKey
+              && !event.altKey
+              && !event.metaKey
+              && !isEditableTarget(event.target)
+              && isWatchPage()
+              && playerElement()
+            ) {
+              event.preventDefault();
+              event.stopPropagation();
+              event.stopImmediatePropagation();
+              toggleWindowFullscreen();
+            }
+          }, true);
+
+          document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement) {
+              return;
+            }
+
+            document.exitFullscreen()
+              .catch(() => {})
+              .finally(() => setWindowFullscreen(true));
+          }, true);
+
+          window.addEventListener('yt-navigate-finish', () => {
+            if (!isWatchPage()) {
+              setWindowFullscreen(false);
+            }
+
+            window.setTimeout(updateFullscreenButtons, 250);
+          });
+
+          const observer = new MutationObserver(() => {
+            updateFullscreenButtons();
+
+            if (isWindowFullscreen() && !isWatchPage()) {
+              setWindowFullscreen(false);
+            }
+          });
+
+          const beginObserving = () => {
+            if (!document.documentElement) {
+              window.setTimeout(beginObserving, 20);
+              return;
+            }
+
+            observer.observe(document.documentElement, {
+              childList: true,
+              subtree: true
+            });
+            updateFullscreenButtons();
+          };
+
+          beginObserving();
+        })();
+        """;
 }
