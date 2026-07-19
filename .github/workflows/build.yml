@@ -76,7 +76,7 @@ jobs:
           if-no-files-found: error
 
       - name: Select release version
-        if: success() && github.event_name != 'pull_request'
+        if: success() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
         shell: bash
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
@@ -91,24 +91,23 @@ jobs:
 
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
 
-      - name: Create or update GitHub Release
-        if: success() && github.event_name != 'pull_request'
+      - name: Publish GitHub Release
+        if: success() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" \
-              artifacts/WindowedYouTubePlayer-win-x64.zip \
-              artifacts/WindowedYouTubePlayer-win-x64.sha256 \
-              --repo "${{ github.repository }}" \
-              --clobber
-          else
-            gh release create "$RELEASE_TAG" \
-              artifacts/WindowedYouTubePlayer-win-x64.zip \
-              artifacts/WindowedYouTubePlayer-win-x64.sha256 \
-              --repo "${{ github.repository }}" \
-              --target main \
-              --title "Windowed YouTube Player $RELEASE_TAG" \
-              --generate-notes
+            echo "Release $RELEASE_TAG already exists. Keeping its published assets unchanged."
+            exit 0
           fi
+
+          gh release create "$RELEASE_TAG" \
+            artifacts/WindowedYouTubePlayer-win-x64.zip \
+            artifacts/WindowedYouTubePlayer-win-x64.sha256 \
+            --repo "${{ github.repository }}" \
+            --target main \
+            --title "Windowed YouTube Player $RELEASE_TAG" \
+            --generate-notes
