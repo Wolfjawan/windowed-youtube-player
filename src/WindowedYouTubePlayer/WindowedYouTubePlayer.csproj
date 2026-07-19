@@ -8,5 +8,10 @@
     <AssemblyName>WindowedYouTubePlayer</AssemblyName>
     <RootNamespace>WindowedYouTubePlayer</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+  </ItemGroup>
 </Project>
