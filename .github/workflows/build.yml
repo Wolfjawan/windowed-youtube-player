@@ -56,6 +56,7 @@ jobs:
             --output artifacts/win-x64 2>&1 | tee artifacts/build.log
 
       - name: Package Windows build
+        if: success()
         shell: bash
         run: |
           cd artifacts/win-x64
@@ -64,6 +65,7 @@ jobs:
           sha256sum WindowedYouTubePlayer-win-x64.zip > WindowedYouTubePlayer-win-x64.sha256
 
       - name: Upload workflow artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: WindowedYouTubePlayer-win-x64
@@ -74,7 +76,7 @@ jobs:
           if-no-files-found: error
 
       - name: Select release version
-        if: github.event_name != 'pull_request'
+        if: success() && github.event_name != 'pull_request'
         shell: bash
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
@@ -90,7 +92,7 @@ jobs:
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
 
       - name: Create or update GitHub Release
-        if: github.event_name != 'pull_request'
+        if: success() && github.event_name != 'pull_request'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
