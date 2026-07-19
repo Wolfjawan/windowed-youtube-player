@@ -1,31 +1,61 @@
 # Windowed YouTube Player
 
-A small Windows launcher that plays YouTube in a clean, resizable Brave app window.
+A small Windows application that opens YouTube as one clean, resizable Brave app window.
 
-It is designed for ultrawide and large monitors where normal YouTube fullscreen is too large, but the surrounding browser and YouTube interface are distracting.
+It is designed for ultrawide and large monitors where normal fullscreen takes over too much screen space. You can browse YouTube normally, search for videos, and then make a video fill only the current window.
 
 ## What it does
 
-- Accepts normal YouTube, `youtu.be`, Shorts, live-video, embed, and playlist links.
-- Converts the link into YouTube's focused embed player.
-- Launches the player using the installed Brave browser's Chromium engine.
-- Removes tabs, the address bar, comments, recommendations, and the normal YouTube page.
-- Lets you choose the initial player-window dimensions.
-- Disables YouTube's monitor-wide fullscreen button so playback remains windowed.
-- Can remove or restore the Brave window frame after launch.
-- Reuses the normal Brave profile, including its cookies, hardware acceleration, and Shields settings.
+- Opens directly on the normal YouTube home page.
+- Shows only one visible window; there is no separate URL launcher.
+- Lets you search, browse, sign in, use subscriptions, history, playlists, comments and recommendations normally.
+- Uses Brave's Chromium app mode, so there are no browser tabs or address bar around YouTube.
+- Replaces YouTube's monitor-wide fullscreen behaviour with **window fullscreen**.
+- Keeps the Brave app window movable and resizable while the video fills its complete content area.
+- Supports the normal YouTube fullscreen button, the `F` key and double-clicking the video.
+- Uses `Esc` to return to normal YouTube browsing.
 
 ## How it works
 
-The application launches Brave with its Chromium `--app=<URL>` mode. Brave remains a separate process; it is not copied or embedded into this repository.
+The executable starts Brave with a dedicated persistent profile and a small unpacked extension generated under the user's local application-data directory.
+
+The extension runs only on YouTube. When window fullscreen is active, it hides the YouTube header, sidebars, comments and recommendations, and expands the video player to the complete Brave app window. It does not request physical-monitor fullscreen.
+
+Brave remains a separate process; it is not copied or embedded as a reusable browser SDK.
+
+## Dedicated Brave profile
+
+The application uses this persistent profile directory:
+
+```text
+%LOCALAPPDATA%\WindowedYouTubePlayer\BraveProfile
+```
+
+You may sign in to YouTube once in that window. Cookies, login state and YouTube preferences remain available on later launches.
+
+The generated extension is stored at:
+
+```text
+%LOCALAPPDATA%\WindowedYouTubePlayer\WindowFullscreenExtension
+```
 
 ## Requirements
 
 - Windows 10 or Windows 11
 - Brave Browser installed
-- .NET 8 Desktop Runtime when running a framework-dependent development build
 
-The release workflow creates a self-contained Windows executable that does not require a separate .NET installation.
+The GitHub release is self-contained and does not require a separate .NET installation.
+
+## Usage
+
+1. Run `WindowedYouTubePlayer.exe`.
+2. Search or browse directly inside YouTube.
+3. Open a video.
+4. Click YouTube's fullscreen button, press `F`, or double-click the video.
+5. The video fills only the resizable Brave app window.
+6. Press `Esc` to return to the normal YouTube page.
+
+Windows snap shortcuts such as `Win + Left` and `Win + Right` remain available because the physical display is never placed into fullscreen mode.
 
 ## Run from source
 
@@ -43,43 +73,21 @@ The output is written to `artifacts\win-x64`.
 
 ## Automated Windows builds and releases
 
-The GitHub Actions workflow builds the app on pushes to `main`, pull requests, version tags, and manual runs.
+The GitHub Actions workflow uses GitHub's hosted `ubuntu-latest` runner to cross-publish a self-contained Windows x64 build.
 
-Every successful run uploads a self-contained `win-x64` ZIP as a workflow artifact. A GitHub Release is created when either:
+Pull requests compile and upload a test artifact. Merging a pull request into `main`, pushing to `main`, or manually running the workflow builds the application and creates or updates the configured GitHub Release.
 
-- a tag beginning with `v` is pushed, such as `v0.1.0`; or
-- **Run workflow** is selected on the Actions page and a release version is entered.
-
-The release contains:
+Release files:
 
 - `WindowedYouTubePlayer-win-x64.zip`
 - `WindowedYouTubePlayer-win-x64.sha256`
 
-## Usage
-
-1. Paste a YouTube video or playlist URL.
-2. Select the starting width and height.
-3. Select **Start borderless** when you want only the video area visible.
-4. Click **Launch player**.
-5. Resize the Brave app window to use only the part of the monitor you want.
-6. Use **Toggle player frame** to switch between a normal movable frame and the clean borderless presentation.
-
-In borderless mode, Windows snap shortcuts such as `Win + Left` and `Win + Right` are useful for repositioning the player.
-
 ## Current limitations
 
-- Some YouTube videos are configured by their publisher to block embedded playback.
-- Brave must already be installed.
-- Brave is launched externally rather than being embedded as a reusable Brave SDK, because Brave does not provide an official embeddable desktop web-view component.
-- When Brave already has many windows open, Windows may occasionally prevent the launcher from identifying the newly created window. Video playback still opens, but frame-control buttons may be unavailable for that launch.
-
-## Planned improvements
-
-- Remember exact player position and size.
-- Always-on-top option.
-- Video queue and recent-link history.
-- Global keyboard shortcuts.
-- Aspect-ratio lock while resizing.
+- Brave must be installed.
+- This is a dedicated Brave profile, separate from the user's normal Brave profile.
+- Browser-level fullscreen such as `F11` is controlled by Brave itself. Use YouTube's fullscreen button, `F`, or video double-click for window fullscreen.
+- YouTube may change its page structure, requiring updates to the window-fullscreen extension selectors.
 
 ## Licence
 
