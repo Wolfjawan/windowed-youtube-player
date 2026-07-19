@@ -1,13 +1,14 @@
-name: Build Windows app
+name: Build and release Windows app
 
 on:
   push:
     branches: ["main"]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -32,9 +33,31 @@ jobs:
         shell: pwsh
         run: ./scripts/publish.ps1
 
-      - name: Upload Windows build
+      - name: Package release ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path artifacts/win-x64/* -DestinationPath artifacts/WindowedYouTubePlayer-win-x64.zip -Force
+          $hash = (Get-FileHash artifacts/WindowedYouTubePlayer-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  WindowedYouTubePlayer-win-x64.zip" | Set-Content artifacts/WindowedYouTubePlayer-win-x64.sha256
+
+      - name: Upload Windows build artifact
         uses: actions/upload-artifact@v4
         with:
           name: WindowedYouTubePlayer-win-x64
-          path: artifacts/win-x64/
+          path: |
+            artifacts/WindowedYouTubePlayer-win-x64.zip
+            artifacts/WindowedYouTubePlayer-win-x64.sha256
           if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            artifacts/WindowedYouTubePlayer-win-x64.zip `
+            artifacts/WindowedYouTubePlayer-win-x64.sha256 `
+            --repo "${{ github.repository }}" `
+            --title "Windowed YouTube Player ${{ github.ref_name }}" `
+            --generate-notes
