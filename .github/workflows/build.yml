@@ -5,6 +5,8 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  pull_request_target:
+    types: [closed]
   workflow_dispatch:
     inputs:
       version:
@@ -17,16 +19,19 @@ permissions:
   contents: write
 
 concurrency:
-  group: windowed-youtube-player-${{ github.ref }}
+  group: windowed-youtube-player-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && 'main' || github.ref }}
 
       - name: Set up .NET 8
         uses: actions/setup-dotnet@v4
@@ -100,7 +105,7 @@ jobs:
               artifacts/WindowedYouTubePlayer-win-x64.zip \
               artifacts/WindowedYouTubePlayer-win-x64.sha256 \
               --repo "${{ github.repository }}" \
-              --target "${{ github.sha }}" \
+              --target main \
               --title "Windowed YouTube Player $RELEASE_TAG" \
               --generate-notes
           fi
