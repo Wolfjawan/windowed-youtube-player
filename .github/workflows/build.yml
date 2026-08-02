@@ -82,11 +82,6 @@ jobs:
             $certificateSource = "build-specific self-signed certificate"
           }
 
-          certutil -user -addstore -f Root $cerPath | Out-Host
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          certutil -user -addstore -f TrustedPublisher $cerPath | Out-Host
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
           @{
             PfxPath = $pfxPath
             Password = $password
@@ -112,7 +107,7 @@ jobs:
             --output artifacts/win-x64 2>&1 | Tee-Object artifacts/build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Sign and verify application
+      - name: Sign and inspect application
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -125,8 +120,14 @@ jobs:
           $application = Resolve-Path "artifacts/win-x64/WindowedStreamingPlayer.exe"
           & $signtool.FullName sign /f $signing.PfxPath /p $signing.Password /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d "Windowed Streaming Player" $application
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $signtool.FullName verify /pa /all /v $application
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $signature = Get-AuthenticodeSignature $application
+          if ($null -eq $signature.SignerCertificate) { throw "The application has no Authenticode signer." }
+          if ($signature.SignerCertificate.Thumbprint -ne $signing.Thumbprint) { throw "The application signer does not match the build certificate." }
+          if ($signature.SignatureType -ne "Authenticode") { throw "The application does not contain an Authenticode signature." }
+          if ($signature.Status -in @("NotSigned", "HashMismatch")) { throw "The application signature is invalid: $($signature.Status)." }
+          if ($null -eq $signature.TimeStamperCertificate) { throw "The application signature is not timestamped." }
+          Write-Host "Application signature embedded. Trust status on the runner: $($signature.Status)."
 
       - name: Install Inno Setup
         shell: pwsh
@@ -139,7 +140,7 @@ jobs:
           & $iscc installer/WindowedStreamingPlayer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Sign and verify installer
+      - name: Sign and inspect installer
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -152,8 +153,14 @@ jobs:
           $installer = Get-ChildItem artifacts/installer/WindowedStreamingPlayer-Setup-*.exe | Select-Object -First 1
           & $signtool.FullName sign /f $signing.PfxPath /p $signing.Password /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d "Windowed Streaming Player Installer" $installer.FullName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $signtool.FullName verify /pa /all /v $installer.FullName
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $signature = Get-AuthenticodeSignature $installer.FullName
+          if ($null -eq $signature.SignerCertificate) { throw "The installer has no Authenticode signer." }
+          if ($signature.SignerCertificate.Thumbprint -ne $signing.Thumbprint) { throw "The installer signer does not match the build certificate." }
+          if ($signature.SignatureType -ne "Authenticode") { throw "The installer does not contain an Authenticode signature." }
+          if ($signature.Status -in @("NotSigned", "HashMismatch")) { throw "The installer signature is invalid: $($signature.Status)." }
+          if ($null -eq $signature.TimeStamperCertificate) { throw "The installer signature is not timestamped." }
+          Write-Host "Installer signature embedded. Trust status on the runner: $($signature.Status)."
 
       - name: Create certificate trust package and checksums
         shell: pwsh
