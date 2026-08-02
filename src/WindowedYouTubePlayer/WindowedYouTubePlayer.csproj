@@ -11,15 +11,16 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon Condition="Exists('app.ico')">app.ico</ApplicationIcon>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <Version>0.4.0</Version>
-    <AssemblyVersion>0.4.0.0</AssemblyVersion>
-    <FileVersion>0.4.0.0</FileVersion>
+    <Version>0.5.0</Version>
+    <AssemblyVersion>0.5.0.0</AssemblyVersion>
+    <FileVersion>0.5.0.0</FileVersion>
     <Product>Windowed Streaming Player</Product>
-    <Description>Open streaming websites in a resizable browser app window with video-only window fullscreen.</Description>
+    <Description>Open multiple streaming websites from an accessible control center with video-only window fullscreen.</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="MainForm.cs" />
     <Compile Include="BrowserSetup.cs" />
     <Compile Include="SiteSetup.cs" />
     <Compile Include="BrowserControl.cs" />

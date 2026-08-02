@@ -1,55 +1,68 @@
 # Windowed Streaming Player
 
-Windowed Streaming Player is an installable Windows application that opens a streaming website in a clean, resizable Chromium-browser app window.
+Windowed Streaming Player is an installable Windows application for opening YouTube, Crunchyroll, Prime Video, Netflix and other websites in separate, resizable Chromium app windows.
 
-It is designed for ultrawide and large monitors where normal fullscreen takes over the whole display. The video can fill only the current window while the window remains movable, resizable and compatible with Windows Snap.
+It is designed for ultrawide and large monitors where normal fullscreen takes over the whole display. A video can fill only its current app window while the window remains movable, resizable and compatible with Windows Snap.
 
-## Supported setup flow
+## Control center
 
-The first launch after installation guides you through two steps:
+Version 0.5.0 introduces a persistent control-center window. Opening the desktop or Start-menu shortcut shows a service chooser instead of immediately opening the previously saved website.
 
-1. Choose a Chromium-based browser.
-2. Choose a streaming website or enter its main URL.
+The control center includes:
 
-Detected browsers include Brave, Google Chrome, Microsoft Edge, Vivaldi, Opera and Chromium. A **Browse…** option allows another Chromium-based browser executable to be selected manually.
+- quick buttons for YouTube, Crunchyroll, Prime Video, Netflix, Disney+ and BBC iPlayer
+- a custom-website option
+- the currently selected browser and preferred website
+- status information when a streaming window is opened
 
-Built-in website choices include:
+Launching the application again brings the existing control center to the front.
 
-- YouTube
-- Crunchyroll
-- Prime Video
-- Netflix
-- Disney+
-- BBC iPlayer
-- Any custom HTTP or HTTPS website
+## Application menus
 
-The browser and website choices are saved. Open **Change browser or website** from the Start menu, run the app with `--settings`, or hold **Shift** while launching to change them.
+### File
+
+- **New Window…** (`Ctrl+N`) — choose a preset or custom website and open it in another streaming window
+- **Open Preferred Website** (`Ctrl+Shift+N`)
+- **Exit**
+
+### Edit
+
+- **Change Browser…** — choose Brave, Chrome, Edge, Vivaldi, Opera, Chromium or browse to another Chromium executable
+- **Change Preferred Website…** — change the website preselected by the New Window dialog
+
+### Help
+
+- **About** — display the application version and purpose
+
+Existing streaming windows remain open when the selected browser or preferred website is changed. The new setting applies to later windows.
 
 ## Video-only window fullscreen
 
-The app injects a small controller through the selected browser's local DevTools interface. When a website requests fullscreen, or when you press `F` or double-click a visible video, the active player is moved into a top-level black overlay that fills only the app window.
+The app controls each streaming window through the selected browser's local DevTools interface. When a website requests fullscreen, or when you press `F` or double-click a visible video, the active player is moved into a top-level black overlay that fills only that app window.
 
 This hides the website header, search bar, title, channel or programme details, comments, recommendations and other page content. Press `Esc` to restore the player to its original page position.
 
+The controller now attaches to every new streaming window created from the control center, rather than only the first browser window.
+
 ## Installation
 
-Download `WindowedStreamingPlayer-Setup-0.4.0.exe` from the GitHub release and run it.
+Download `WindowedStreamingPlayer-Setup-0.5.0.exe` from the GitHub release and run it.
 
 The installer:
 
 - installs under `Program Files\Windowed Streaming Player`
 - creates a Start-menu shortcut
 - creates a desktop shortcut by default
-- adds a **Change browser or website** Start-menu shortcut
+- adds a **Choose browser** Start-menu shortcut
 - includes a proper application and uninstaller icon
 - adds a normal Windows uninstaller
-- launches the first-run setup after installation
+- launches the control center after installation
 
 The application is self-contained and does not require a separate .NET installation.
 
 ## Browser data
 
-The app keeps separate persistent browser profiles under:
+The app keeps a separate persistent profile for each selected browser under:
 
 ```text
 %LOCALAPPDATA%\WindowedYouTubePlayer\BrowserProfiles

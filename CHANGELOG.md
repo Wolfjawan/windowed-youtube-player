@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.0
+
+- Added a persistent control-center window instead of immediately opening the last website.
+- Added quick-launch buttons for common streaming services and custom websites.
+- Added File, Edit and Help menus.
+- Added File → New Window for choosing and opening another streaming site.
+- Added File → Open Preferred Website.
+- Added Edit options for changing the browser and preferred website.
+- Added Help → About with application version information.
+- Changed a second application launch to bring the existing control center forward.
+- Added support for controlling and injecting fullscreen behaviour into every newly opened streaming window.
+- Preserved browser and website settings from version 0.4.0.
+
 ## 0.4.0
 
 - Renamed the installed product to Windowed Streaming Player.
