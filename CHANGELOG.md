@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1
+
+- Added Authenticode signing for both the application executable and the final installer.
+- Added signature verification to the GitHub Actions build.
+- Added a private-build self-signed certificate trust package.
+- Added a certificate installation helper for Windows Trusted Root and Trusted Publishers stores.
+- Added release checksums covering the installer, certificate and trust package.
+- Supports an optional persistent signing PFX through encrypted GitHub secrets; otherwise each build creates a build-specific private certificate.
+
 ## 0.5.0
 
 - Added a persistent control-center window instead of immediately opening the last website.
