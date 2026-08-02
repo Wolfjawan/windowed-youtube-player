@@ -5,8 +5,8 @@ internal static class FullscreenSafetyInjection
     public const string Source = """
         (() => {
           'use strict';
-          if (window.__wspFullscreenSafetyInstalledV4) return;
-          window.__wspFullscreenSafetyInstalledV4 = true;
+          if (window.__wspFullscreenSafetyInstalledV5) return;
+          window.__wspFullscreenSafetyInstalledV5 = true;
 
           const controller = () => window.__wspWindowFullscreen || null;
           const nativeExitFullscreen = Document.prototype.exitFullscreen;
@@ -136,37 +136,16 @@ internal static class FullscreenSafetyInjection
             event.stopImmediatePropagation();
           }
 
-          let suppressClickUntil = 0;
-
-          window.addEventListener('pointerdown', event => {
-            const control = fullscreenControlFromEvent(event);
-            if (!control || !controller()) return;
-
-            blockEvent(event);
-            suppressClickUntil = performance.now() + 900;
-            controller().toggle(control);
-          }, true);
-
-          window.addEventListener('mousedown', event => {
-            const control = fullscreenControlFromEvent(event);
-            if (!control || !controller()) return;
-
-            blockEvent(event);
-            if (performance.now() >= suppressClickUntil) {
-              suppressClickUntil = performance.now() + 900;
-              controller().toggle(control);
-            }
-          }, true);
-
+          // Toggle only on the completed click. v0.5.4 toggled on pointerdown and
+          // then suppressed the actual click, which prevented several players from
+          // completing their control interaction and left the video unchanged.
           window.addEventListener('click', event => {
+            const activeController = controller();
             const control = fullscreenControlFromEvent(event);
-            if (!control || !controller()) return;
+            if (!control || !activeController) return;
 
             blockEvent(event);
-            if (performance.now() >= suppressClickUntil) {
-              suppressClickUntil = performance.now() + 400;
-              controller().toggle(control);
-            }
+            activeController.toggle(control);
           }, true);
 
           window.addEventListener('keydown', event => {
