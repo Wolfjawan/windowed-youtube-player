@@ -2,7 +2,7 @@
 
 Windowed Streaming Player is an installable Windows application for opening YouTube, Crunchyroll, Prime Video, Netflix and other websites in separate, resizable Chromium app windows.
 
-It is designed for ultrawide and large monitors where normal fullscreen takes over the whole display. A video can fill only its current app window while the window remains movable, resizable and compatible with Windows Snap.
+It is designed for ultrawide and large monitors where ordinary fullscreen takes over the entire display. A video can fill only its current app window while the window remains movable, resizable and compatible with Windows Snap.
 
 ## Responsive control center
 
@@ -37,25 +37,34 @@ Launching the application again brings the existing control center to the front.
 
 - **About**
 
+## Enforced window-only fullscreen
+
+The app does not permit streaming pages to use Chromium's monitor-wide native fullscreen mode. Its dedicated browser profile is configured with native fullscreen disabled before the browser starts.
+
+Every new streaming window follows this sequence:
+
+1. Open a blank Chromium app window.
+2. Connect the local DevTools controller.
+3. Install the window-fullscreen controller and safety interception in the page.
+4. Navigate to the selected streaming service only after protection is active.
+
+If the controller cannot be attached, the app refuses to load the website rather than opening an unprotected window that could take over the monitor.
+
+Fullscreen control is installed in the top page and embedded player frames. The app watches both page and iframe DevTools targets, including cross-origin frames used by streaming services.
+
+Clicking the website's fullscreen button, pressing `F`, or double-clicking a visible video expands the player only to the edges of its current app window. The Windows title bar and the window's position on the monitor remain under Windows control. Press `Esc`, click the fullscreen button again, or press `F` again to restore the page.
+
+The player remains in its original document structure and is temporarily pinned over a black backdrop. This avoids relocating YouTube's live video element, which can disrupt hardware-rendered video surfaces.
+
+The app supplies a compatible synthetic Fullscreen API so websites can keep their fullscreen controls and update their fullscreen icon even though native monitor fullscreen is blocked.
+
 ## Browser connection behaviour
 
-Opening a website and attaching the video-only fullscreen controller are treated as separate operations. When the browser opens successfully but its local DevTools endpoint is delayed, the application does not display a false failure message. It reports that the website opened and retries the controller connection quietly in the background.
-
-Each dedicated browser profile stores a stable debugging port so the application can reconnect more reliably on later launches. Existing streaming sign-ins and preferences remain saved.
-
-## Video-only window fullscreen
-
-The app controls each streaming window through the selected Chromium browser's local DevTools interface. Fullscreen control is injected into the top page and every existing or future player frame, including cross-origin embedded players used by services such as Crunchyroll.
-
-The player remains in its original document position and is temporarily pinned over a black backdrop. It is not moved into a replacement container, which preserves hardware-rendered video surfaces used by YouTube and other DRM or GPU-accelerated players.
-
-Clicking a website's fullscreen button, pressing `F`, or double-clicking a visible video fills only the current streaming app window. It does not enter monitor-wide native fullscreen. Press `Esc`, click the fullscreen button again, or press `F` again to restore the page.
-
-The controller supplies synthetic fullscreen state and change events so player controls can update while the browser remains in a normal resizable window.
+Each dedicated browser profile stores a stable local debugging port. New windows are prepared through that controller before navigation. Existing streaming sign-ins and preferences remain saved in the dedicated profile.
 
 ## Private self-signed installation
 
-Version 0.5.3 signs both `WindowedStreamingPlayer.exe` and the final setup executable with Authenticode. Because this is a private self-signed build, Windows does not trust the certificate automatically.
+Version 0.5.4 signs both `WindowedStreamingPlayer.exe` and the final setup executable with Authenticode. Because this is a private self-signed build, Windows does not trust the certificate automatically.
 
 Use this order:
 
@@ -63,7 +72,7 @@ Use this order:
 2. Extract the ZIP.
 3. Right-click `Trust-WindowedStreamingPlayer-Certificate.cmd` and choose **Run as administrator**.
 4. Confirm that the certificate was added to the Windows Trusted Root and Trusted Publishers stores.
-5. Download `WindowedStreamingPlayer-Setup-0.5.3.exe` after installing the certificate.
+5. Download `WindowedStreamingPlayer-Setup-0.5.4.exe` after installing the certificate.
 6. Run the installer.
 
 The release also includes the public `.cer` file and SHA-256 checksums.
@@ -77,7 +86,7 @@ The GitHub workflow supports two modes:
 - **Persistent private certificate:** configure encrypted repository secrets named `WSP_SIGNING_PFX_BASE64` and `WSP_SIGNING_PFX_PASSWORD`.
 - **Build-specific certificate:** when those secrets are absent, the workflow generates a new private self-signed certificate and publishes its public certificate with that release.
 
-The private key is never committed to the repository. The workflow signs and verifies the inner application first, builds the installer, then signs and verifies the final setup executable.
+The private key is never committed to the repository. The workflow signs and inspects the inner application first, builds the installer, then signs and inspects the final setup executable.
 
 ## Installation details
 
@@ -110,9 +119,9 @@ Streaming-service sign-ins and preferences remain available on later launches. T
 
 Firefox is not currently supported because the application relies on Chromium app-window and DevTools interfaces.
 
-## Automated builds
+## Automated builds and releases
 
-GitHub Actions uses a GitHub-hosted Windows runner. Pull requests compile and sign a validation installer. A push to `main` publishes the version declared in the project file unless that release already exists.
+GitHub Actions uses a GitHub-hosted Windows runner. Pull requests compile and sign a validation installer. When a pull request is merged into `main`, a separate merge-triggered job rebuilds the signed package, creates or updates the declared version release and verifies that the installer, trust ZIP, public certificate and checksum file are all present.
 
 ## Logo sources
 
