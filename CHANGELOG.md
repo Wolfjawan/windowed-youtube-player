@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- Added a first-run browser picker for Brave, Google Chrome, Microsoft Edge, Vivaldi and Chromium.
+- Detects the supported Windows default browser and preselects it when available.
+- Added a **Browse…** option for selecting a supported browser executable manually.
+- Saves the selected browser and reuses it on later launches.
+- Added Shift-at-startup browser reselection.
+- Changed window fullscreen to move the live YouTube player into a top-level video-only overlay.
+- Hides the YouTube header, search bar, video title, channel details, comments and recommendations while window fullscreen is active.
+- Restores the player to its original YouTube page position when `Esc` is pressed.
+
 ## 0.2.1
 
 - Fixed window fullscreen leaving the video at its previous calculated size against a black background.
