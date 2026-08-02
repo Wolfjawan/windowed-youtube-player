@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.4
+
+- Enforced window-only fullscreen in the dedicated Chromium profile by disabling native monitor-wide fullscreen before the browser starts.
+- Changed streaming windows to open at `about:blank`, install fullscreen protection first and only then navigate to the selected service.
+- Refuses to load the streaming website when the local controller cannot be attached safely.
+- Added early pointer, mouse, click and keyboard interception for player fullscreen controls.
+- Keeps fullscreen controls visible by exposing a compatible synthetic fullscreen API while native fullscreen remains blocked.
+- Expanded DevTools monitoring to both page and iframe targets for embedded streaming players.
+- Reduced the controller target-discovery interval for faster attachment to newly created player frames.
+- Updated the private signed installer to version 0.5.4.
+
 ## 0.5.3
 
 - Reworked window-only fullscreen so the live video player stays in its original DOM position instead of being moved into another container.
