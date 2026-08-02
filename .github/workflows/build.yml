@@ -3,12 +3,14 @@ name: Build Windows installer
 on:
   pull_request:
     branches: ["main"]
-  push:
+    types: [opened, synchronize, reopened]
+  pull_request_target:
     branches: ["main"]
+    types: [closed]
   workflow_dispatch:
     inputs:
       version:
-        description: Optional release version override, for example v0.5.1
+        description: Optional release version override, for example v0.5.4
         required: false
         type: string
 
@@ -21,11 +23,14 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.merged == true
     runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && 'main' || github.sha }}
 
       - name: Set up .NET 8
         uses: actions/setup-dotnet@v4
@@ -241,24 +246,57 @@ jobs:
           if (-not $tag.StartsWith("v")) { $tag = "v$tag" }
           "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Publish GitHub Release
+      - name: Publish and verify GitHub Release
         if: success() && github.event_name != 'pull_request'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view $env:RELEASE_TAG --repo "${{ github.repository }}" *> $null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Release $env:RELEASE_TAG already exists. Keeping its assets unchanged."
-            exit 0
-          }
+          $ErrorActionPreference = "Stop"
           $installer = Get-ChildItem artifacts/installer/WindowedStreamingPlayer-Setup-*.exe | Select-Object -First 1
-          gh release create $env:RELEASE_TAG `
-            $installer.FullName `
-            artifacts/installer/WindowedStreamingPlayer-PrivateTrust.zip `
-            artifacts/installer/WindowedStreamingPlayer-SelfSigned.cer `
-            artifacts/installer/WindowedStreamingPlayer-Release.sha256 `
+          $assets = @(
+            $installer.FullName,
+            (Resolve-Path artifacts/installer/WindowedStreamingPlayer-PrivateTrust.zip).Path,
+            (Resolve-Path artifacts/installer/WindowedStreamingPlayer-SelfSigned.cer).Path,
+            (Resolve-Path artifacts/installer/WindowedStreamingPlayer-Release.sha256).Path
+          )
+
+          gh release view $env:RELEASE_TAG --repo "${{ github.repository }}" *> $null
+          $releaseExists = $LASTEXITCODE -eq 0
+
+          if ($releaseExists) {
+            gh release upload $env:RELEASE_TAG @assets `
+              --repo "${{ github.repository }}" `
+              --clobber
+          }
+          else {
+            gh release create $env:RELEASE_TAG @assets `
+              --repo "${{ github.repository }}" `
+              --target main `
+              --title "Windowed Streaming Player $env:RELEASE_TAG" `
+              --generate-notes
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $release = gh release view $env:RELEASE_TAG `
             --repo "${{ github.repository }}" `
-            --target main `
-            --title "Windowed Streaming Player $env:RELEASE_TAG" `
-            --generate-notes
+            --json tagName,url,assets | ConvertFrom-Json
+
+          $expectedAssets = @(
+            $installer.Name,
+            "WindowedStreamingPlayer-PrivateTrust.zip",
+            "WindowedStreamingPlayer-SelfSigned.cer",
+            "WindowedStreamingPlayer-Release.sha256"
+          )
+          $actualAssets = @($release.assets | ForEach-Object name)
+          foreach ($expected in $expectedAssets) {
+            if ($actualAssets -notcontains $expected) {
+              throw "Release $env:RELEASE_TAG is missing required asset $expected."
+            }
+          }
+
+          if ($release.tagName -ne $env:RELEASE_TAG) {
+            throw "Published release tag does not match $env:RELEASE_TAG."
+          }
+
+          Write-Host "Verified release $($release.url) with all required assets."
