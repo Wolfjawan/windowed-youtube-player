@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.3
+
+- Reworked window-only fullscreen so the live video player stays in its original DOM position instead of being moved into another container.
+- Fixed YouTube showing a black player after entering window fullscreen.
+- Added fullscreen interception inside existing and future cross-origin player frames.
+- Fixed Crunchyroll and similar embedded players escaping into monitor-wide native fullscreen.
+- Added capture-phase handling for common fullscreen buttons, labels and keyboard shortcuts.
+- Added synthetic fullscreen state and change events so streaming players can update their controls without entering native fullscreen.
+- Preserved Escape, double-click and F-key window-fullscreen controls.
+
 ## 0.5.2
 
 - Replaced fixed-width launcher buttons with a responsive one-, two- or three-column card layout.
