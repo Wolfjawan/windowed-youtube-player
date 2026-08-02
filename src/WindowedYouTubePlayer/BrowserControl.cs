@@ -75,7 +75,16 @@ internal sealed class BrowserSession : IDisposable
             debuggingPort = ResolveDebuggingPort();
             bool endpointAvailable = await DevToolsController.IsEndpointAvailableAsync(debuggingPort);
 
-            Process? process = StartBrowser(siteUrl, debuggingPort);
+            if (!endpointAvailable)
+            {
+                BrowserProfilePolicy.EnforceWindowOnlyFullscreen(profileDirectory);
+            }
+
+            HashSet<string> existingPageTargets = endpointAvailable
+                ? await DevToolsController.GetWindowPageTargetIdsAsync(debuggingPort)
+                : new HashSet<string>(StringComparer.Ordinal);
+
+            Process? process = StartBrowser("about:blank", debuggingPort);
             if (process is null)
             {
                 throw new InvalidOperationException($"{browserName} did not open a new window.");
@@ -87,20 +96,35 @@ internal sealed class BrowserSession : IDisposable
                 rootProcess = process;
             }
 
-            if (endpointAvailable)
-            {
-                EnsureControllerMonitor(startWithRecovery: false);
-                await Task.Delay(180);
-                return new BrowserLaunchResult(true, true);
-            }
-
-            bool connected = await DevToolsController.TryWaitUntilAvailableAsync(
+            bool connected = endpointAvailable || await DevToolsController.TryWaitUntilAvailableAsync(
                 debuggingPort,
-                TimeSpan.FromSeconds(6),
+                TimeSpan.FromSeconds(20),
                 CancellationToken.None);
 
-            EnsureControllerMonitor(startWithRecovery: !connected);
-            return new BrowserLaunchResult(true, connected);
+            if (!connected)
+            {
+                TryCloseLaunchedBrowser();
+                throw new InvalidOperationException(
+                    $"{browserName} opened, but its local controller did not become available. "
+                    + "The website was not opened because monitor-wide fullscreen could not be blocked safely.");
+            }
+
+            bool prepared = await DevToolsController.PrepareAndNavigateWindowAsync(
+                debuggingPort,
+                existingPageTargets,
+                siteUrl,
+                TimeSpan.FromSeconds(12),
+                CancellationToken.None);
+
+            if (!prepared)
+            {
+                throw new InvalidOperationException(
+                    $"{browserName} opened a window, but the app could not prepare window-only fullscreen "
+                    + "before loading the website.");
+            }
+
+            EnsureControllerMonitor(startWithRecovery: false);
+            return new BrowserLaunchResult(true, true);
         }
         finally
         {
@@ -117,18 +141,7 @@ internal sealed class BrowserSession : IDisposable
 
         disposed = true;
         controllerCancellation?.Cancel();
-
-        try
-        {
-            if (rootProcess is not null && !rootProcess.HasExited)
-            {
-                rootProcess.Kill(entireProcessTree: true);
-            }
-        }
-        catch
-        {
-            // The dedicated browser process may already be closing.
-        }
+        TryCloseLaunchedBrowser();
 
         controllerCancellation?.Dispose();
         rootProcess?.Dispose();
@@ -165,7 +178,7 @@ internal sealed class BrowserSession : IDisposable
         }, token);
     }
 
-    private Process? StartBrowser(string siteUrl, int port)
+    private Process? StartBrowser(string initialUrl, int port)
     {
         ProcessStartInfo startInfo = new(browserPath)
         {
@@ -177,7 +190,7 @@ internal sealed class BrowserSession : IDisposable
         startInfo.ArgumentList.Add($"--remote-debugging-port={port}");
         startInfo.ArgumentList.Add("--remote-debugging-address=127.0.0.1");
         startInfo.ArgumentList.Add("--remote-allow-origins=http://127.0.0.1");
-        startInfo.ArgumentList.Add($"--app={siteUrl}");
+        startInfo.ArgumentList.Add($"--app={initialUrl}");
         startInfo.ArgumentList.Add("--new-window");
         startInfo.ArgumentList.Add("--window-size=1280,720");
         startInfo.ArgumentList.Add("--no-first-run");
@@ -186,6 +199,21 @@ internal sealed class BrowserSession : IDisposable
         startInfo.ArgumentList.Add("--disable-background-mode");
 
         return Process.Start(startInfo);
+    }
+
+    private void TryCloseLaunchedBrowser()
+    {
+        try
+        {
+            if (rootProcess is not null && !rootProcess.HasExited)
+            {
+                rootProcess.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // The dedicated browser process may already be closing.
+        }
     }
 
     private int ResolveDebuggingPort()
@@ -254,7 +282,8 @@ internal static class DevToolsController
         using HttpClient client = CreateHttpClient();
         try
         {
-            using HttpResponseMessage response = await client.GetAsync($"http://127.0.0.1:{port}/json/version");
+            using HttpResponseMessage response = await client.GetAsync(
+                $"http://127.0.0.1:{port}/json/version");
             return response.IsSuccessStatusCode;
         }
         catch
@@ -278,7 +307,7 @@ internal static class DevToolsController
 
             try
             {
-                await Task.Delay(250, cancellationToken);
+                await Task.Delay(200, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -289,6 +318,105 @@ internal static class DevToolsController
         return false;
     }
 
+    public static async Task<HashSet<string>> GetWindowPageTargetIdsAsync(int port)
+    {
+        using HttpClient client = CreateHttpClient();
+        IReadOnlyList<DevToolsTarget> targets = await GetTargetsAsync(client, port);
+        return targets
+            .Where(target => string.Equals(target.Type, "page", StringComparison.OrdinalIgnoreCase))
+            .Select(target => target.Id)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    public static async Task<bool> PrepareAndNavigateWindowAsync(
+        int port,
+        HashSet<string> existingPageTargetIds,
+        string destinationUrl,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        using HttpClient client = CreateHttpClient();
+        DateTime deadline = DateTime.UtcNow.Add(timeout);
+        DevToolsTarget? target = null;
+
+        while (DateTime.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
+        {
+            IReadOnlyList<DevToolsTarget> targets = await GetTargetsAsync(client, port);
+            DevToolsTarget[] newPages = targets
+                .Where(candidate =>
+                    string.Equals(candidate.Type, "page", StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrWhiteSpace(candidate.Id)
+                    && !string.IsNullOrWhiteSpace(candidate.WebSocketDebuggerUrl)
+                    && !existingPageTargetIds.Contains(candidate.Id))
+                .ToArray();
+
+            target = newPages.FirstOrDefault(candidate =>
+                         string.Equals(candidate.Url, "about:blank", StringComparison.OrdinalIgnoreCase))
+                     ?? newPages.FirstOrDefault();
+
+            if (target is not null)
+            {
+                break;
+            }
+
+            try
+            {
+                await Task.Delay(100, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+        }
+
+        if (target is null || string.IsNullOrWhiteSpace(target.WebSocketDebuggerUrl))
+        {
+            return false;
+        }
+
+        using ClientWebSocket socket = new();
+        socket.Options.SetRequestHeader("Origin", "http://127.0.0.1");
+
+        try
+        {
+            await socket.ConnectAsync(new Uri(target.WebSocketDebuggerUrl), cancellationToken);
+            int id = 0;
+
+            await SendCommandAsync(socket, ++id, "Page.enable", null, cancellationToken);
+            await SendCommandAsync(socket, ++id, "Runtime.enable", null, cancellationToken);
+            await SendCommandAsync(
+                socket,
+                ++id,
+                "Page.addScriptToEvaluateOnNewDocument",
+                new
+                {
+                    source = FullscreenInjection.Source,
+                    runImmediately = true
+                },
+                cancellationToken);
+            await SendInjectionAsync(socket, ++id, null, cancellationToken);
+            await SendCommandAsync(
+                socket,
+                ++id,
+                "Page.navigate",
+                new { url = destinationUrl },
+                cancellationToken);
+
+            await Task.Delay(150, cancellationToken);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (WebSocketException)
+        {
+            return false;
+        }
+    }
+
     public static async Task MonitorAsync(int port, CancellationToken cancellationToken)
     {
         using HttpClient client = CreateHttpClient();
@@ -296,7 +424,7 @@ internal static class DevToolsController
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            IReadOnlyList<DevToolsTarget> targets = await GetPageTargetsAsync(client, port);
+            IReadOnlyList<DevToolsTarget> targets = await GetControlledTargetsAsync(client, port);
 
             foreach (DevToolsTarget target in targets)
             {
@@ -324,7 +452,7 @@ internal static class DevToolsController
 
             try
             {
-                await Task.Delay(500, cancellationToken);
+                await Task.Delay(150, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -338,27 +466,31 @@ internal static class DevToolsController
         Timeout = TimeSpan.FromSeconds(2)
     };
 
-    private static async Task<IReadOnlyList<DevToolsTarget>> GetPageTargetsAsync(
+    private static async Task<IReadOnlyList<DevToolsTarget>> GetControlledTargetsAsync(
+        HttpClient client,
+        int port)
+    {
+        IReadOnlyList<DevToolsTarget> targets = await GetTargetsAsync(client, port);
+        return targets
+            .Where(target =>
+                (string.Equals(target.Type, "page", StringComparison.OrdinalIgnoreCase)
+                 || string.Equals(target.Type, "iframe", StringComparison.OrdinalIgnoreCase))
+                && !string.IsNullOrWhiteSpace(target.Id)
+                && !string.IsNullOrWhiteSpace(target.WebSocketDebuggerUrl)
+                && target.Url is not null
+                && (target.Url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                    || target.Url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
+    }
+
+    private static async Task<IReadOnlyList<DevToolsTarget>> GetTargetsAsync(
         HttpClient client,
         int port)
     {
         try
         {
             string json = await client.GetStringAsync($"http://127.0.0.1:{port}/json/list");
-            List<DevToolsTarget>? targets = JsonSerializer.Deserialize<List<DevToolsTarget>>(
-                json,
-                JsonOptions);
-
-            return targets?
-                .Where(target =>
-                    string.Equals(target.Type, "page", StringComparison.OrdinalIgnoreCase)
-                    && !string.IsNullOrWhiteSpace(target.Id)
-                    && !string.IsNullOrWhiteSpace(target.WebSocketDebuggerUrl)
-                    && target.Url is not null
-                    && (target.Url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-                        || target.Url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
-                .ToArray()
-                ?? [];
+            return JsonSerializer.Deserialize<List<DevToolsTarget>>(json, JsonOptions) ?? [];
         }
         catch
         {
@@ -427,8 +559,10 @@ internal static class DevToolsController
                             cancellationToken);
                     }
                     else if (string.Equals(method, "Runtime.executionContextDestroyed", StringComparison.Ordinal)
-                             && root.TryGetProperty("params", out JsonElement destroyedParams)
-                             && destroyedParams.TryGetProperty("executionContextId", out JsonElement destroyedId)
+                             && root.TryGetProperty("params", out JsonElement destroyedParameters)
+                             && destroyedParameters.TryGetProperty(
+                                 "executionContextId",
+                                 out JsonElement destroyedId)
                              && destroyedId.TryGetInt64(out long removedContextId))
                     {
                         injectedContexts.Remove(removedContextId);
