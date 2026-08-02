@@ -1,118 +1,83 @@
-# Windowed YouTube Player
+# Windowed Streaming Player
 
-A small Windows application that opens YouTube as one clean, resizable Chromium app window.
+Windowed Streaming Player is an installable Windows application that opens a streaming website in a clean, resizable Chromium-browser app window.
 
-It is designed for ultrawide and large monitors where normal fullscreen takes over too much screen space. You can browse YouTube normally, search for videos, and then make only the video fill the current window.
+It is designed for ultrawide and large monitors where normal fullscreen takes over the whole display. The video can fill only the current window while the window remains movable, resizable and compatible with Windows Snap.
 
-## What it does
+## Supported setup flow
 
-- Opens directly on the normal YouTube home page.
-- Shows only one visible browser window after browser selection.
-- Lets you search, browse, sign in, use subscriptions, history, playlists, comments and recommendations normally.
-- Supports Brave, Google Chrome, Microsoft Edge, Vivaldi and Chromium.
-- Uses Chromium app mode, so there are no browser tabs or address bar around YouTube.
-- Replaces YouTube's monitor-wide fullscreen behaviour with **video-only window fullscreen**.
-- Hides the YouTube header, search bar, video title, channel information, comments and recommendations while window fullscreen is active.
-- Keeps the browser app window movable and resizable while the video fills its complete content area.
-- Supports the normal YouTube fullscreen button, the `F` key and double-clicking the video.
-- Uses `Esc` to restore the complete YouTube page.
+The first launch after installation guides you through two steps:
 
-## Browser selection
+1. Choose a Chromium-based browser.
+2. Choose a streaming website or enter its main URL.
 
-The first time v0.3.0 starts, it displays a browser picker. The app detects supported installed browsers and preselects the Windows default browser when that browser is supported.
+Detected browsers include Brave, Google Chrome, Microsoft Edge, Vivaldi, Opera and Chromium. A **Browse…** option allows another Chromium-based browser executable to be selected manually.
 
-You can also select **Browse…** and choose the browser executable manually. Supported executable names are:
+Built-in website choices include:
 
-- `brave.exe`
-- `chrome.exe`
-- `msedge.exe`
-- `vivaldi.exe`
-- `chromium.exe`
+- YouTube
+- Crunchyroll
+- Prime Video
+- Netflix
+- Disney+
+- BBC iPlayer
+- Any custom HTTP or HTTPS website
 
-The selection is saved under:
+The browser and website choices are saved. Open **Change browser or website** from the Start menu, run the app with `--settings`, or hold **Shift** while launching to change them.
 
-```text
-%LOCALAPPDATA%\WindowedYouTubePlayer\browser-path.txt
-```
+## Video-only window fullscreen
 
-To choose a different browser later, hold **Shift** while starting `WindowedYouTubePlayer.exe`.
+The app injects a small controller through the selected browser's local DevTools interface. When a website requests fullscreen, or when you press `F` or double-click a visible video, the active player is moved into a top-level black overlay that fills only the app window.
 
-Firefox and other non-Chromium browsers are not supported because the app relies on Chromium app mode and an unpacked extension.
+This hides the website header, search bar, title, channel or programme details, comments, recommendations and other page content. Press `Esc` to restore the player to its original page position.
 
-## How video-only window fullscreen works
+## Installation
 
-The executable generates a small local browser extension that runs only on YouTube.
+Download `WindowedStreamingPlayer-Setup-0.4.0.exe` from the GitHub release and run it.
 
-When window fullscreen is activated, the extension temporarily moves the live YouTube player into a top-level overlay covering the browser window. This prevents YouTube's header and the content below the video from remaining visible. Pressing `Esc` restores the player to its original place on the YouTube page.
+The installer:
 
-The physical display is never placed into fullscreen mode.
+- installs under `Program Files\Windowed Streaming Player`
+- creates a Start-menu shortcut
+- creates a desktop shortcut by default
+- adds a **Change browser or website** Start-menu shortcut
+- includes a proper application and uninstaller icon
+- adds a normal Windows uninstaller
+- launches the first-run setup after installation
 
-## Dedicated browser profiles
+The application is self-contained and does not require a separate .NET installation.
 
-Each supported browser receives its own persistent profile under:
+## Browser data
 
-```text
-%LOCALAPPDATA%\WindowedYouTubePlayer\BrowserProfiles\<browser>
-```
-
-You may sign in to YouTube once in the selected browser window. Cookies, login state and YouTube preferences remain available on later launches using that browser.
-
-The generated extension is stored at:
+The app keeps separate persistent browser profiles under:
 
 ```text
-%LOCALAPPDATA%\WindowedYouTubePlayer\WindowFullscreenExtension
+%LOCALAPPDATA%\WindowedYouTubePlayer\BrowserProfiles
 ```
+
+Streaming-service sign-ins and preferences remain available on later launches. These profiles are separate from the browser's normal profile.
 
 ## Requirements
 
-- Windows 10 or Windows 11
-- Brave, Google Chrome, Microsoft Edge, Vivaldi or Chromium
+- Windows 10 or Windows 11, 64-bit
+- A Chromium-based browser
+- Internet access for the selected streaming service
 
-The GitHub release is self-contained and does not require a separate .NET installation.
+Firefox is not currently supported because this application relies on Chromium's app-window and DevTools interfaces.
 
-## Usage
+## Build from source
 
-1. Run `WindowedYouTubePlayer.exe`.
-2. Select the browser on first launch.
-3. Search or browse directly inside YouTube.
-4. Open a video.
-5. Click YouTube's fullscreen button, press `F`, or double-click the video.
-6. Only the video and its playback controls fill the resizable browser app window.
-7. Press `Esc` to return to the normal YouTube page.
-
-Windows snap shortcuts such as `Win + Left` and `Win + Right` remain available because the physical display is never placed into fullscreen mode.
-
-## Run from source
-
-```powershell
-dotnet run --project .\src\WindowedYouTubePlayer\WindowedYouTubePlayer.csproj
-```
-
-## Create a standalone Windows build
+Install .NET 8 SDK and Inno Setup 6, then run:
 
 ```powershell
 .\scripts\publish.ps1
 ```
 
-The output is written to `artifacts\win-x64`.
+The installer is written to `artifacts\installer`.
 
-## Automated Windows builds and releases
+## Automated builds
 
-The GitHub Actions workflow uses GitHub's hosted `ubuntu-latest` runner to cross-publish a self-contained Windows x64 build.
-
-Pull requests and normal pushes compile and upload workflow artifacts. A merged pull request or manual workflow run can publish the configured GitHub Release.
-
-Release files:
-
-- `WindowedYouTubePlayer-win-x64.zip`
-- `WindowedYouTubePlayer-win-x64.sha256`
-
-## Current limitations
-
-- Only Chromium-based browsers that support app mode and unpacked extensions are supported.
-- Each browser uses a dedicated profile separate from the user's normal browser profile.
-- Browser-level fullscreen such as `F11` is controlled by the browser itself. Use YouTube's fullscreen button, `F`, or video double-click for window fullscreen.
-- YouTube may change its page structure, requiring updates to the window-fullscreen extension selectors.
+GitHub Actions uses the GitHub-hosted `windows-latest` runner. Pull requests build an installer artifact. A push to `main` publishes the version declared in the project file unless that release already exists.
 
 ## Licence
 
