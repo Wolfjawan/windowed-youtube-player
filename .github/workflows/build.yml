@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Optional release version override, for example v0.4.0
+        description: Optional release version override, for example v0.5.1
         required: false
         type: string
 
@@ -38,6 +38,61 @@ jobs:
           $bytes = [Convert]::FromBase64String((Get-Content assets/app.ico.b64 -Raw).Trim())
           [IO.File]::WriteAllBytes("src/WindowedYouTubePlayer/app.ico", $bytes)
 
+      - name: Prepare private-build signing certificate
+        shell: pwsh
+        env:
+          WSP_SIGNING_PFX_BASE64: ${{ secrets.WSP_SIGNING_PFX_BASE64 }}
+          WSP_SIGNING_PFX_PASSWORD: ${{ secrets.WSP_SIGNING_PFX_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pfxPath = Join-Path $env:RUNNER_TEMP "WindowedStreamingPlayer-Signing.pfx"
+          $cerPath = Join-Path $env:RUNNER_TEMP "WindowedStreamingPlayer-SelfSigned.cer"
+
+          if (-not [string]::IsNullOrWhiteSpace($env:WSP_SIGNING_PFX_BASE64) -and
+              -not [string]::IsNullOrWhiteSpace($env:WSP_SIGNING_PFX_PASSWORD)) {
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WSP_SIGNING_PFX_BASE64.Trim()))
+            $password = $env:WSP_SIGNING_PFX_PASSWORD
+            $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+            $certificate = Import-PfxCertificate `
+              -FilePath $pfxPath `
+              -CertStoreLocation Cert:\CurrentUser\My `
+              -Password $securePassword `
+              -Exportable |
+              Where-Object HasPrivateKey |
+              Select-Object -First 1
+            if ($null -eq $certificate) { throw "The configured PFX has no private key." }
+            Export-Certificate -Cert $certificate -FilePath $cerPath -Force | Out-Null
+            $certificateSource = "persistent GitHub secret"
+          }
+          else {
+            $password = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+            $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+            $certificate = New-SelfSignedCertificate `
+              -Type CodeSigning `
+              -Subject "CN=Windowed Streaming Player Private Build" `
+              -FriendlyName "Windowed Streaming Player Private Build" `
+              -CertStoreLocation Cert:\CurrentUser\My `
+              -HashAlgorithm SHA256 `
+              -KeyAlgorithm RSA `
+              -KeyLength 3072 `
+              -KeyExportPolicy Exportable `
+              -NotAfter (Get-Date).AddYears(5)
+            Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $securePassword -Force | Out-Null
+            Export-Certificate -Cert $certificate -FilePath $cerPath -Force | Out-Null
+            $certificateSource = "build-specific self-signed certificate"
+          }
+
+          @{
+            PfxPath = $pfxPath
+            Password = $password
+            CerPath = $cerPath
+            Thumbprint = $certificate.Thumbprint
+            Subject = $certificate.Subject
+            Source = $certificateSource
+          } | ConvertTo-Json | Set-Content (Join-Path $env:RUNNER_TEMP "wsp-signing.json") -Encoding utf8
+
+          Write-Host "Prepared $certificateSource with thumbprint $($certificate.Thumbprint)."
+
       - name: Publish self-contained Windows x64 app
         shell: pwsh
         run: |
@@ -52,6 +107,28 @@ jobs:
             --output artifacts/win-x64 2>&1 | Tee-Object artifacts/build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Sign and inspect application
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $signing = Get-Content (Join-Path $env:RUNNER_TEMP "wsp-signing.json") -Raw | ConvertFrom-Json
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse |
+            Where-Object FullName -Match '\\x64\\signtool\.exe$' |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($null -eq $signtool) { throw "signtool.exe was not found." }
+          $application = Resolve-Path "artifacts/win-x64/WindowedStreamingPlayer.exe"
+          & $signtool.FullName sign /f $signing.PfxPath /p $signing.Password /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d "Windowed Streaming Player" $application
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $signature = Get-AuthenticodeSignature $application
+          if ($null -eq $signature.SignerCertificate) { throw "The application has no Authenticode signer." }
+          if ($signature.SignerCertificate.Thumbprint -ne $signing.Thumbprint) { throw "The application signer does not match the build certificate." }
+          if ($signature.SignatureType -ne "Authenticode") { throw "The application does not contain an Authenticode signature." }
+          if ($signature.Status -in @("NotSigned", "HashMismatch")) { throw "The application signature is invalid: $($signature.Status)." }
+          if ($null -eq $signature.TimeStamperCertificate) { throw "The application signature is not timestamped." }
+          Write-Host "Application signature embedded. Trust status on the runner: $($signature.Status)."
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
@@ -63,12 +140,81 @@ jobs:
           & $iscc installer/WindowedStreamingPlayer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Create installer checksum
+      - name: Sign and inspect installer
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $signing = Get-Content (Join-Path $env:RUNNER_TEMP "wsp-signing.json") -Raw | ConvertFrom-Json
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse |
+            Where-Object FullName -Match '\\x64\\signtool\.exe$' |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($null -eq $signtool) { throw "signtool.exe was not found." }
           $installer = Get-ChildItem artifacts/installer/WindowedStreamingPlayer-Setup-*.exe | Select-Object -First 1
-          $hash = Get-FileHash $installer.FullName -Algorithm SHA256
-          "$($hash.Hash.ToLowerInvariant())  $($installer.Name)" | Set-Content artifacts/installer/WindowedStreamingPlayer-Setup.sha256 -Encoding ascii
+          & $signtool.FullName sign /f $signing.PfxPath /p $signing.Password /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d "Windowed Streaming Player Installer" $installer.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $signature = Get-AuthenticodeSignature $installer.FullName
+          if ($null -eq $signature.SignerCertificate) { throw "The installer has no Authenticode signer." }
+          if ($signature.SignerCertificate.Thumbprint -ne $signing.Thumbprint) { throw "The installer signer does not match the build certificate." }
+          if ($signature.SignatureType -ne "Authenticode") { throw "The installer does not contain an Authenticode signature." }
+          if ($signature.Status -in @("NotSigned", "HashMismatch")) { throw "The installer signature is invalid: $($signature.Status)." }
+          if ($null -eq $signature.TimeStamperCertificate) { throw "The installer signature is not timestamped." }
+          Write-Host "Installer signature embedded. Trust status on the runner: $($signature.Status)."
+
+      - name: Create certificate trust package and checksums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $signing = Get-Content (Join-Path $env:RUNNER_TEMP "wsp-signing.json") -Raw | ConvertFrom-Json
+          New-Item -ItemType Directory -Force artifacts/trust | Out-Null
+          Copy-Item $signing.CerPath artifacts/trust/WindowedStreamingPlayer-SelfSigned.cer
+
+          @'
+          @echo off
+          net session >nul 2>&1
+          if not %errorlevel%==0 (
+            echo Right-click this file and choose "Run as administrator".
+            pause
+            exit /b 1
+          )
+          certutil -addstore -f Root "%~dp0WindowedStreamingPlayer-SelfSigned.cer"
+          if errorlevel 1 goto failed
+          certutil -addstore -f TrustedPublisher "%~dp0WindowedStreamingPlayer-SelfSigned.cer"
+          if errorlevel 1 goto failed
+          echo The Windowed Streaming Player private-build certificate is now trusted.
+          echo Re-download and run the installer.
+          pause
+          exit /b 0
+          :failed
+          echo The certificate could not be installed.
+          pause
+          exit /b 1
+          '@ | Set-Content artifacts/trust/Trust-WindowedStreamingPlayer-Certificate.cmd -Encoding ascii
+
+          @"
+          Windowed Streaming Player private-build certificate
+          Subject: $($signing.Subject)
+          SHA-1 thumbprint: $($signing.Thumbprint)
+          Certificate source: $($signing.Source)
+
+          Extract this ZIP, right-click Trust-WindowedStreamingPlayer-Certificate.cmd,
+          choose Run as administrator, and then re-download the setup EXE.
+          "@ | Set-Content artifacts/trust/README.txt -Encoding utf8
+
+          Compress-Archive -Path artifacts/trust/* -DestinationPath artifacts/installer/WindowedStreamingPlayer-PrivateTrust.zip -Force
+          Copy-Item artifacts/trust/WindowedStreamingPlayer-SelfSigned.cer artifacts/installer/
+
+          $files = @(
+            (Get-ChildItem artifacts/installer/WindowedStreamingPlayer-Setup-*.exe | Select-Object -First 1),
+            (Get-Item artifacts/installer/WindowedStreamingPlayer-PrivateTrust.zip),
+            (Get-Item artifacts/installer/WindowedStreamingPlayer-SelfSigned.cer)
+          )
+          $checksumLines = foreach ($file in $files) {
+            $hash = Get-FileHash $file.FullName -Algorithm SHA256
+            "$($hash.Hash.ToLowerInvariant())  $($file.Name)"
+          }
+          $checksumLines | Set-Content artifacts/installer/WindowedStreamingPlayer-Release.sha256 -Encoding ascii
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
@@ -76,7 +222,9 @@ jobs:
           name: WindowedStreamingPlayer-Installer
           path: |
             artifacts/installer/WindowedStreamingPlayer-Setup-*.exe
-            artifacts/installer/WindowedStreamingPlayer-Setup.sha256
+            artifacts/installer/WindowedStreamingPlayer-PrivateTrust.zip
+            artifacts/installer/WindowedStreamingPlayer-SelfSigned.cer
+            artifacts/installer/WindowedStreamingPlayer-Release.sha256
             artifacts/build.log
           if-no-files-found: error
 
@@ -104,11 +252,12 @@ jobs:
             Write-Host "Release $env:RELEASE_TAG already exists. Keeping its assets unchanged."
             exit 0
           }
-
           $installer = Get-ChildItem artifacts/installer/WindowedStreamingPlayer-Setup-*.exe | Select-Object -First 1
           gh release create $env:RELEASE_TAG `
             $installer.FullName `
-            artifacts/installer/WindowedStreamingPlayer-Setup.sha256 `
+            artifacts/installer/WindowedStreamingPlayer-PrivateTrust.zip `
+            artifacts/installer/WindowedStreamingPlayer-SelfSigned.cer `
+            artifacts/installer/WindowedStreamingPlayer-Release.sha256 `
             --repo "${{ github.repository }}" `
             --target main `
             --title "Windowed Streaming Player $env:RELEASE_TAG" `
