@@ -1,113 +1,115 @@
-name: Build and release Windows app
+name: Build Windows installer
 
 on:
-  push:
-    branches: ["main"]
   pull_request:
     branches: ["main"]
-  pull_request_target:
+  push:
     branches: ["main"]
-    types: [closed]
   workflow_dispatch:
     inputs:
       version:
-        description: Release version, for example v0.3.0
-        required: true
-        default: v0.3.0
+        description: Optional release version override, for example v0.4.0
+        required: false
         type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: windowed-youtube-player-${{ github.event_name }}-${{ github.ref }}
+  group: windowed-streaming-player-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    if: github.event_name != 'pull_request_target' || github.event.pull_request.merged == true
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request_target' && 'main' || github.ref }}
 
       - name: Set up .NET 8
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
 
+      - name: Restore application icon
+        shell: pwsh
+        run: |
+          $bytes = [Convert]::FromBase64String((Get-Content assets/app.ico.b64 -Raw).Trim())
+          [IO.File]::WriteAllBytes("src/WindowedYouTubePlayer/app.ico", $bytes)
+
       - name: Publish self-contained Windows x64 app
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          mkdir -p artifacts
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          dotnet publish src/WindowedYouTubePlayer/WindowedYouTubePlayer.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:ContinuousIntegrationBuild=true `
+            --output artifacts/win-x64 2>&1 | Tee-Object artifacts/build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          dotnet publish src/WindowedYouTubePlayer/WindowedYouTubePlayer.csproj \
-            --configuration Release \
-            --runtime win-x64 \
-            --self-contained true \
-            -p:PublishSingleFile=true \
-            -p:IncludeNativeLibrariesForSelfExtract=true \
-            -p:ContinuousIntegrationBuild=true \
-            -p:EnableWindowsTargeting=true \
-            --output artifacts/win-x64 2>&1 | tee artifacts/build.log
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
 
-      - name: Package Windows build
-        if: success()
-        shell: bash
+      - name: Build installer
+        shell: pwsh
         run: |
-          cd artifacts/win-x64
-          zip -r ../WindowedYouTubePlayer-win-x64.zip .
-          cd ..
-          sha256sum WindowedYouTubePlayer-win-x64.zip > WindowedYouTubePlayer-win-x64.sha256
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc installer/WindowedStreamingPlayer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Upload workflow artifact
-        if: always()
+      - name: Create installer checksum
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem artifacts/installer/WindowedStreamingPlayer-Setup-*.exe | Select-Object -First 1
+          $hash = Get-FileHash $installer.FullName -Algorithm SHA256
+          "$($hash.Hash.ToLowerInvariant())  $($installer.Name)" | Set-Content artifacts/installer/WindowedStreamingPlayer-Setup.sha256 -Encoding ascii
+
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WindowedYouTubePlayer-win-x64
+          name: WindowedStreamingPlayer-Installer
           path: |
-            artifacts/WindowedYouTubePlayer-win-x64.zip
-            artifacts/WindowedYouTubePlayer-win-x64.sha256
+            artifacts/installer/WindowedStreamingPlayer-Setup-*.exe
+            artifacts/installer/WindowedStreamingPlayer-Setup.sha256
             artifacts/build.log
           if-no-files-found: error
 
       - name: Select release version
-        if: success() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
-        shell: bash
+        if: success() && github.event_name != 'pull_request'
+        shell: pwsh
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            tag="${{ inputs.version }}"
-          else
-            tag="v0.3.0"
-          fi
-
-          if [[ "$tag" != v* ]]; then
-            tag="v$tag"
-          fi
-
-          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.version }}".Trim()) {
+            $tag = "${{ inputs.version }}".Trim()
+          } else {
+            [xml]$project = Get-Content src/WindowedYouTubePlayer/WindowedYouTubePlayer.csproj
+            $tag = "v$($project.Project.PropertyGroup.Version)"
+          }
+          if (-not $tag.StartsWith("v")) { $tag = "v$tag" }
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Publish GitHub Release
-        if: success() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
-        shell: bash
+        if: success() && github.event_name != 'pull_request'
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-
-          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "Release $RELEASE_TAG already exists. Keeping its published assets unchanged."
+          gh release view $env:RELEASE_TAG --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $env:RELEASE_TAG already exists. Keeping its assets unchanged."
             exit 0
-          fi
+          }
 
-          gh release create "$RELEASE_TAG" \
-            artifacts/WindowedYouTubePlayer-win-x64.zip \
-            artifacts/WindowedYouTubePlayer-win-x64.sha256 \
-            --repo "${{ github.repository }}" \
-            --target main \
-            --title "Windowed YouTube Player $RELEASE_TAG" \
+          $installer = Get-ChildItem artifacts/installer/WindowedStreamingPlayer-Setup-*.exe | Select-Object -First 1
+          gh release create $env:RELEASE_TAG `
+            $installer.FullName `
+            artifacts/installer/WindowedStreamingPlayer-Setup.sha256 `
+            --repo "${{ github.repository }}" `
+            --target main `
+            --title "Windowed Streaming Player $env:RELEASE_TAG" `
             --generate-notes
