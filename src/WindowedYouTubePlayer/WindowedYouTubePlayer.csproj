@@ -6,16 +6,23 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>WindowedYouTubePlayer</AssemblyName>
+    <AssemblyName>WindowedStreamingPlayer</AssemblyName>
     <RootNamespace>WindowedYouTubePlayer</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon Condition="Exists('app.ico')">app.ico</ApplicationIcon>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <Version>0.3.0</Version>
-    <AssemblyVersion>0.3.0.0</AssemblyVersion>
-    <FileVersion>0.3.0.0</FileVersion>
+    <Version>0.4.0</Version>
+    <AssemblyVersion>0.4.0.0</AssemblyVersion>
+    <FileVersion>0.4.0.0</FileVersion>
+    <Product>Windowed Streaming Player</Product>
+    <Description>Open streaming websites in a resizable browser app window with video-only window fullscreen.</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="BrowserSetup.cs" />
+    <Compile Include="SiteSetup.cs" />
+    <Compile Include="BrowserControl.cs" />
+    <Compile Include="FullscreenInjection.cs" />
   </ItemGroup>
 </Project>

@@ -1,40 +1,28 @@
 # Changelog
 
+## 0.4.0
+
+- Renamed the installed product to Windowed Streaming Player.
+- Added a Windows installer that installs under Program Files.
+- Added Start-menu and desktop shortcuts, an uninstaller and a proper application icon.
+- Added a first-run browser-and-website setup flow.
+- Added built-in selections for YouTube, Crunchyroll, Prime Video, Netflix, Disney+ and BBC iPlayer.
+- Added support for entering any custom HTTP or HTTPS website URL.
+- Added Start-menu, command-line and Shift-at-startup ways to change browser or website later.
+- Replaced unpacked-extension launching with local Chromium DevTools injection.
+- Generalised video-only window fullscreen for HTML5 streaming sites.
+- Added persistent per-browser application profiles.
+
 ## 0.3.0
 
-- Added a first-run browser picker for Brave, Google Chrome, Microsoft Edge, Vivaldi and Chromium.
-- Detects the supported Windows default browser and preselects it when available.
-- Added a **Browse…** option for selecting a supported browser executable manually.
-- Saves the selected browser and reuses it on later launches.
-- Added Shift-at-startup browser reselection.
-- Changed window fullscreen to move the live YouTube player into a top-level video-only overlay.
-- Hides the YouTube header, search bar, video title, channel details, comments and recommendations while window fullscreen is active.
-- Restores the player to its original YouTube page position when `Esc` is pressed.
+- Added a browser picker for Brave, Google Chrome, Microsoft Edge, Vivaldi and Chromium.
+- Changed window fullscreen to a top-level video-only overlay.
 
 ## 0.2.1
 
 - Fixed window fullscreen leaving the video at its previous calculated size against a black background.
-- Applies fullscreen positioning only to the actual YouTube player instead of every nested page container.
-- Forces the video surface and controls to follow the current Brave window dimensions.
-- Recalculates the player after entering fullscreen and whenever the window is resized.
 
 ## 0.2.0
 
 - Removed the separate URL-launcher window.
-- Opened one persistent Brave app window directly on the normal YouTube website.
-- Added normal YouTube browsing, search, sign-in, subscriptions, history, playlists, comments and recommendations.
-- Added a dedicated persistent Brave profile for the application.
-- Replaced YouTube physical-monitor fullscreen with window fullscreen.
-- Added window-fullscreen control through YouTube's fullscreen button, the `F` key and video double-click.
-- Added `Esc` to return to normal YouTube browsing.
-
-## 0.1.1
-
-- Fixed YouTube player Error 153 by serving the embedded player from a loopback HTTP page.
-- Added an HTTP referrer plus matching `origin` and `widget_referrer` parameters.
-- Kept the video inside a clean, resizable Brave app window.
-- Simplified the GitHub-hosted build and release workflow.
-
-## 0.1.0
-
-- Initial Windows release.
+- Added normal YouTube browsing in a single visible app window.
