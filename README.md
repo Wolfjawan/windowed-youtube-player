@@ -37,18 +37,18 @@ Launching the application again brings the existing control center to the front.
 
 - **About**
 
-## Enforced window-only fullscreen
-
-The app does not permit streaming pages to use Chromium's monitor-wide native fullscreen mode. Its dedicated browser profile is configured with native fullscreen disabled before the browser starts.
+## Window-only fullscreen
 
 Every new streaming window follows this sequence:
 
 1. Open a blank Chromium app window.
 2. Connect the local DevTools controller.
-3. Install the window-fullscreen controller and safety interception in the page.
+3. Install the window-fullscreen controller before website JavaScript runs.
 4. Navigate to the selected streaming service only after protection is active.
 
 If the controller cannot be attached, the app refuses to load the website rather than opening an unprotected window that could take over the monitor.
+
+The Chromium Fullscreen API remains available to the player, but its methods are replaced before page load. A player fullscreen request is converted into the app's window-only mode rather than native monitor-wide fullscreen. Version 0.5.5 also repairs profiles written by v0.5.4 that had fullscreen capability disabled.
 
 Fullscreen control is installed in the top page and embedded player frames. The app watches both page and iframe DevTools targets, including cross-origin frames used by streaming services.
 
@@ -56,7 +56,7 @@ Clicking the website's fullscreen button, pressing `F`, or double-clicking a vis
 
 The player remains in its original document structure and is temporarily pinned over a black backdrop. This avoids relocating YouTube's live video element, which can disrupt hardware-rendered video surfaces.
 
-The app supplies a compatible synthetic Fullscreen API so websites can keep their fullscreen controls and update their fullscreen icon even though native monitor fullscreen is blocked.
+Fullscreen buttons toggle on the completed click. The app does not consume the initial pointer-down event, which allows streaming controls to complete their normal interaction while the fullscreen API remains redirected to window-only mode.
 
 ## Browser connection behaviour
 
@@ -64,7 +64,7 @@ Each dedicated browser profile stores a stable local debugging port. New windows
 
 ## Private self-signed installation
 
-Version 0.5.4 signs both `WindowedStreamingPlayer.exe` and the final setup executable with Authenticode. Because this is a private self-signed build, Windows does not trust the certificate automatically.
+Version 0.5.5 signs both `WindowedStreamingPlayer.exe` and the final setup executable with Authenticode. Because this is a private self-signed build, Windows does not trust the certificate automatically.
 
 Use this order:
 
@@ -72,7 +72,7 @@ Use this order:
 2. Extract the ZIP.
 3. Right-click `Trust-WindowedStreamingPlayer-Certificate.cmd` and choose **Run as administrator**.
 4. Confirm that the certificate was added to the Windows Trusted Root and Trusted Publishers stores.
-5. Download `WindowedStreamingPlayer-Setup-0.5.4.exe` after installing the certificate.
+5. Download `WindowedStreamingPlayer-Setup-0.5.5.exe` after installing the certificate.
 6. Run the installer.
 
 The release also includes the public `.cer` file and SHA-256 checksums.
