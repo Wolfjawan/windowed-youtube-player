@@ -10,6 +10,10 @@ internal static class BrowserProfilePolicy
         WriteIndented = false
     };
 
+    // Keep Chromium's Fullscreen API available so streaming players continue to
+    // expose and invoke their fullscreen controls. The injected controller replaces
+    // requestFullscreen before the website loads and converts it to window-only mode.
+    // This also repairs profiles created by v0.5.4, which persisted fullscreen=false.
     public static void EnforceWindowOnlyFullscreen(string userDataDirectory)
     {
         string defaultProfileDirectory = Path.Combine(userDataDirectory, "Default");
@@ -21,18 +25,18 @@ internal static class BrowserProfilePolicy
             Directory.CreateDirectory(defaultProfileDirectory);
 
             JsonObject root = ReadPreferences(preferencesPath);
-            SetBoolean(root, false, "fullscreen", "allowed");
-            SetBoolean(root, false, "apps", "fullscreen", "allowed");
+            SetBoolean(root, true, "fullscreen", "allowed");
+            SetBoolean(root, true, "apps", "fullscreen", "allowed");
 
             File.WriteAllText(temporaryPath, root.ToJsonString(JsonOptions));
             File.Move(temporaryPath, preferencesPath, overwrite: true);
 
             JsonObject verified = ReadPreferences(preferencesPath);
-            if (ReadBoolean(verified, "fullscreen", "allowed") is not false
-                || ReadBoolean(verified, "apps", "fullscreen", "allowed") is not false)
+            if (ReadBoolean(verified, "fullscreen", "allowed") is not true
+                || ReadBoolean(verified, "apps", "fullscreen", "allowed") is not true)
             {
                 throw new InvalidOperationException(
-                    "The dedicated browser profile did not retain the window-only fullscreen policy.");
+                    "The dedicated browser profile did not restore fullscreen controls.");
             }
         }
         catch (Exception exception) when (exception is IOException
@@ -49,11 +53,11 @@ internal static class BrowserProfilePolicy
             }
             catch
             {
-                // Preserve the original policy-writing error.
+                // Preserve the original preference-writing error.
             }
 
             throw new InvalidOperationException(
-                "The app could not disable monitor-wide fullscreen in its dedicated browser profile. "
+                "The app could not prepare fullscreen controls in its dedicated browser profile. "
                 + "Close all streaming windows and try again.",
                 exception);
         }
