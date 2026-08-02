@@ -392,7 +392,7 @@ internal static class DevToolsController
                 "Page.addScriptToEvaluateOnNewDocument",
                 new
                 {
-                    source = FullscreenInjection.Source,
+                    source = FullscreenScripts.Source,
                     runImmediately = true
                 },
                 cancellationToken);
@@ -520,7 +520,7 @@ internal static class DevToolsController
                 "Page.addScriptToEvaluateOnNewDocument",
                 new
                 {
-                    source = FullscreenInjection.Source,
+                    source = FullscreenScripts.Source,
                     runImmediately = true
                 },
                 cancellationToken);
@@ -619,7 +619,7 @@ internal static class DevToolsController
         object parameters = contextId.HasValue
             ? new
             {
-                expression = FullscreenInjection.Source,
+                expression = FullscreenScripts.Source,
                 contextId = contextId.Value,
                 awaitPromise = false,
                 returnByValue = false,
@@ -627,7 +627,7 @@ internal static class DevToolsController
             }
             : new
             {
-                expression = FullscreenInjection.Source,
+                expression = FullscreenScripts.Source,
                 awaitPromise = false,
                 returnByValue = false,
                 userGesture = true
