@@ -82,7 +82,7 @@ jobs:
             $certificateSource = "build-specific self-signed certificate"
           }
 
-          certutil -user -addstore -f TrustedPeople $cerPath | Out-Host
+          certutil -user -addstore -f Root $cerPath | Out-Host
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           certutil -user -addstore -f TrustedPublisher $cerPath | Out-Host
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -203,10 +203,11 @@ jobs:
             (Get-Item artifacts/installer/WindowedStreamingPlayer-PrivateTrust.zip),
             (Get-Item artifacts/installer/WindowedStreamingPlayer-SelfSigned.cer)
           )
-          foreach ($file in $files) {
+          $checksumLines = foreach ($file in $files) {
             $hash = Get-FileHash $file.FullName -Algorithm SHA256
             "$($hash.Hash.ToLowerInvariant())  $($file.Name)"
-          } | Set-Content artifacts/installer/WindowedStreamingPlayer-Release.sha256 -Encoding ascii
+          }
+          $checksumLines | Set-Content artifacts/installer/WindowedStreamingPlayer-Release.sha256 -Encoding ascii
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
