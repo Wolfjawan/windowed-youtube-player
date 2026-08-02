@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.5
+
+- Restored the streaming players' fullscreen controls after v0.5.4 prevented them from filling the app window.
+- Repairs dedicated browser profiles that persisted `fullscreen=false` in v0.5.4.
+- Keeps Chromium's Fullscreen API available while replacing it before page load with the app's window-only implementation.
+- Initializes the window-fullscreen controller before installing fallback safety hooks.
+- Changed fullscreen controls to toggle on the completed click instead of prematurely on pointer-down.
+- Preserves pre-navigation injection, page and iframe monitoring, and fail-closed controller attachment.
+- Updated the private signed installer to version 0.5.5.
+
 ## 0.5.4
 
 - Enforced window-only fullscreen in the dedicated Chromium profile by disabling native monitor-wide fullscreen before the browser starts.
