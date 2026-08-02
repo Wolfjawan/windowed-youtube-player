@@ -2,8 +2,11 @@ namespace WindowedYouTubePlayer;
 
 internal static class FullscreenScripts
 {
+    // Install the capture-phase safety layer before the controller adds its
+    // compatibility listeners. This guarantees that fullscreen controls are
+    // consumed before website or fallback click handlers can request native fullscreen.
     public static string Source { get; } =
-        FullscreenInjection.Source
+        FullscreenSafetyInjection.Source
         + Environment.NewLine
-        + FullscreenSafetyInjection.Source;
+        + FullscreenInjection.Source;
 }
