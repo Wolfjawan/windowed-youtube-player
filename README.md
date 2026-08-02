@@ -4,15 +4,19 @@ Windowed Streaming Player is an installable Windows application for opening YouT
 
 It is designed for ultrawide and large monitors where normal fullscreen takes over the whole display. A video can fill only its current app window while the window remains movable, resizable and compatible with Windows Snap.
 
-## Control center
+## Responsive control center
 
-The persistent control-center window includes:
+The persistent control center uses responsive streaming-service cards instead of fixed-width buttons. Depending on the available width, the launcher automatically arranges the cards into one, two or three columns. Cards never extend beyond the application window; smaller windows use vertical scrolling.
 
-- quick buttons for YouTube, Crunchyroll, Prime Video, Netflix, Disney+ and BBC iPlayer
-- a custom-website option
+Each service has a branded colour treatment and recognisable logo mark for YouTube, Crunchyroll, Prime Video, Netflix, Disney+ and BBC iPlayer. A custom-website card is also available.
+
+The control center includes:
+
+- branded quick-launch cards
 - the currently selected browser and preferred website
 - File, Edit and Help menus
 - support for opening multiple streaming windows
+- keyboard-accessible cards with visible focus states
 
 Launching the application again brings the existing control center to the front.
 
@@ -33,6 +37,12 @@ Launching the application again brings the existing control center to the front.
 
 - **About**
 
+## Browser connection behaviour
+
+Opening a website and attaching the video-only fullscreen controller are treated as separate operations. When the browser opens successfully but its local DevTools endpoint is delayed, the application no longer displays a false failure message. It reports that the website opened and retries the controller connection quietly in the background.
+
+Each dedicated browser profile stores a stable debugging port so the application can reconnect more reliably on later launches. Existing streaming sign-ins and preferences remain saved.
+
 ## Video-only window fullscreen
 
 The app controls each streaming window through the selected Chromium browser's local DevTools interface. When a website requests fullscreen, or when you press `F` or double-click a visible video, the active player fills only that app window.
@@ -41,15 +51,15 @@ Press `Esc` to restore the player to its normal page position.
 
 ## Private self-signed installation
 
-Version 0.5.1 signs both `WindowedStreamingPlayer.exe` and the final setup executable with Authenticode. Because this is a private self-signed build, Windows does not trust the certificate automatically.
+Version 0.5.2 signs both `WindowedStreamingPlayer.exe` and the final setup executable with Authenticode. Because this is a private self-signed build, Windows does not trust the certificate automatically.
 
 Use this order:
 
-1. Download `WindowedStreamingPlayer-PrivateTrust.zip` from the release.
+1. Download `WindowedStreamingPlayer-PrivateTrust.zip` from the same release.
 2. Extract the ZIP.
 3. Right-click `Trust-WindowedStreamingPlayer-Certificate.cmd` and choose **Run as administrator**.
 4. Confirm that the certificate was added to the Windows Trusted Root and Trusted Publishers stores.
-5. Download `WindowedStreamingPlayer-Setup-0.5.1.exe` after installing the certificate.
+5. Download `WindowedStreamingPlayer-Setup-0.5.2.exe` after installing the certificate.
 6. Run the installer.
 
 The release also includes the public `.cer` file and SHA-256 checksums.
@@ -99,6 +109,10 @@ Firefox is not currently supported because the application relies on Chromium ap
 ## Automated builds
 
 GitHub Actions uses a GitHub-hosted Windows runner. Pull requests compile and sign a validation installer. A push to `main` publishes the version declared in the project file unless that release already exists.
+
+## Logo sources
+
+The launcher draws its brand marks locally and does not download artwork while running. Brand names and logos remain trademarks of their respective owners. Simple Icons was used as a reference for consistent brand identification; its repository provides SVG icons and asks users to review its trademark disclaimer.
 
 ## Licence
 

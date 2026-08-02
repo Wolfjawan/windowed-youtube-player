@@ -9,12 +9,14 @@ using System.Text.Json;
 
 namespace WindowedYouTubePlayer;
 
+internal sealed record BrowserLaunchResult(bool BrowserWindowOpened, bool ControllerConnected);
+
 internal sealed class BrowserSessionManager : IDisposable
 {
     private readonly ConcurrentDictionary<string, BrowserSession> sessions =
         new(StringComparer.OrdinalIgnoreCase);
 
-    public Task OpenAsync(AppSettings settings, SiteChoice site)
+    public Task<BrowserLaunchResult> OpenAsync(AppSettings settings, SiteChoice site)
     {
         string key = Path.GetFullPath(settings.BrowserPath);
         BrowserSession session = sessions.GetOrAdd(
@@ -40,6 +42,8 @@ internal sealed class BrowserSessionManager : IDisposable
 
 internal sealed class BrowserSession : IDisposable
 {
+    private const string DebuggingPortFileName = "wsp-debugging-port.txt";
+
     private readonly string browserName;
     private readonly string browserPath;
     private readonly string profileDirectory;
@@ -61,25 +65,15 @@ internal sealed class BrowserSession : IDisposable
         Directory.CreateDirectory(profileDirectory);
     }
 
-    public async Task OpenAsync(string siteUrl)
+    public async Task<BrowserLaunchResult> OpenAsync(string siteUrl)
     {
-        if (disposed)
-        {
-            throw new ObjectDisposedException(nameof(BrowserSession));
-        }
-
+        ObjectDisposedException.ThrowIf(disposed, this);
         await launchLock.WaitAsync();
 
         try
         {
-            bool endpointAvailable = debuggingPort > 0
-                && await DevToolsController.IsAvailableAsync(debuggingPort);
-
-            if (!endpointAvailable)
-            {
-                await StartSessionAsync(siteUrl);
-                return;
-            }
+            debuggingPort = ResolveDebuggingPort();
+            bool endpointAvailable = await DevToolsController.IsEndpointAvailableAsync(debuggingPort);
 
             Process? process = StartBrowser(siteUrl, debuggingPort);
             if (process is null)
@@ -87,7 +81,26 @@ internal sealed class BrowserSession : IDisposable
                 throw new InvalidOperationException($"{browserName} did not open a new window.");
             }
 
-            await Task.Delay(250);
+            if (rootProcess is null || rootProcess.HasExited)
+            {
+                rootProcess?.Dispose();
+                rootProcess = process;
+            }
+
+            if (endpointAvailable)
+            {
+                EnsureControllerMonitor(startWithRecovery: false);
+                await Task.Delay(180);
+                return new BrowserLaunchResult(true, true);
+            }
+
+            bool connected = await DevToolsController.TryWaitUntilAvailableAsync(
+                debuggingPort,
+                TimeSpan.FromSeconds(6),
+                CancellationToken.None);
+
+            EnsureControllerMonitor(startWithRecovery: !connected);
+            return new BrowserLaunchResult(true, connected);
         }
         finally
         {
@@ -122,21 +135,34 @@ internal sealed class BrowserSession : IDisposable
         launchLock.Dispose();
     }
 
-    private async Task StartSessionAsync(string siteUrl)
+    private void EnsureControllerMonitor(bool startWithRecovery)
     {
+        if (controllerTask is { IsCompleted: false })
+        {
+            return;
+        }
+
         controllerCancellation?.Cancel();
         controllerCancellation?.Dispose();
-
-        debuggingPort = ReserveLoopbackPort();
-        rootProcess = StartBrowser(siteUrl, debuggingPort)
-            ?? throw new InvalidOperationException($"{browserName} did not return a running process.");
-
-        await DevToolsController.WaitUntilAvailableAsync(rootProcess, debuggingPort);
-
         controllerCancellation = new CancellationTokenSource();
-        controllerTask = Task.Run(
-            () => DevToolsController.MonitorAsync(debuggingPort, controllerCancellation.Token),
-            controllerCancellation.Token);
+        CancellationToken token = controllerCancellation.Token;
+
+        controllerTask = Task.Run(async () =>
+        {
+            if (startWithRecovery)
+            {
+                bool recovered = await DevToolsController.TryWaitUntilAvailableAsync(
+                    debuggingPort,
+                    TimeSpan.FromMinutes(2),
+                    token);
+                if (!recovered)
+                {
+                    return;
+                }
+            }
+
+            await DevToolsController.MonitorAsync(debuggingPort, token);
+        }, token);
     }
 
     private Process? StartBrowser(string siteUrl, int port)
@@ -160,6 +186,35 @@ internal sealed class BrowserSession : IDisposable
         startInfo.ArgumentList.Add("--disable-background-mode");
 
         return Process.Start(startInfo);
+    }
+
+    private int ResolveDebuggingPort()
+    {
+        string path = Path.Combine(profileDirectory, DebuggingPortFileName);
+        try
+        {
+            if (File.Exists(path)
+                && int.TryParse(File.ReadAllText(path), out int saved)
+                && saved is >= 1024 and <= 65535)
+            {
+                return saved;
+            }
+        }
+        catch
+        {
+            // Replace an unreadable port file below.
+        }
+
+        int port = ReserveLoopbackPort();
+        try
+        {
+            File.WriteAllText(path, port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        catch
+        {
+            // A stable port is an optimisation; launching can continue without persistence.
+        }
+        return port;
     }
 
     private static int ReserveLoopbackPort()
@@ -194,35 +249,44 @@ internal static class DevToolsController
         PropertyNameCaseInsensitive = true
     };
 
-    public static async Task<bool> IsAvailableAsync(int port)
+    public static async Task<bool> IsEndpointAvailableAsync(int port)
     {
         using HttpClient client = CreateHttpClient();
-        return (await GetPageTargetsAsync(client, port)).Count > 0;
+        try
+        {
+            using HttpResponseMessage response = await client.GetAsync($"http://127.0.0.1:{port}/json/version");
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
-    public static async Task WaitUntilAvailableAsync(Process launchedProcess, int port)
+    public static async Task<bool> TryWaitUntilAvailableAsync(
+        int port,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
     {
-        using HttpClient client = CreateHttpClient();
-        DateTime deadline = DateTime.UtcNow.AddSeconds(20);
-
-        while (DateTime.UtcNow < deadline)
+        DateTime deadline = DateTime.UtcNow.Add(timeout);
+        while (DateTime.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
         {
-            if ((await GetPageTargetsAsync(client, port)).Count > 0)
+            if (await IsEndpointAvailableAsync(port))
             {
-                return;
+                return true;
             }
 
-            if (launchedProcess.HasExited && DateTime.UtcNow > deadline.AddSeconds(-15))
+            try
             {
-                break;
+                await Task.Delay(250, cancellationToken);
             }
-
-            await Task.Delay(250);
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
         }
 
-        throw new InvalidOperationException(
-            "The selected browser opened, but the app could not connect to its local control interface. "
-            + "Try another Chromium-based browser.");
+        return false;
     }
 
     public static async Task MonitorAsync(int port, CancellationToken cancellationToken)

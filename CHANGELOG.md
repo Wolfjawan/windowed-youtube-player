@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.2
+
+- Replaced fixed-width launcher buttons with a responsive one-, two- or three-column card layout.
+- Added automatic vertical scrolling without allowing cards to extend beyond the application window.
+- Added a polished streaming-themed background, branded gradients, hover states and recognisable service logo treatments.
+- Improved keyboard focus and accessibility for service cards.
+- Separated successful browser launch from optional DevTools controller attachment.
+- Removed the false blocking error when a website window opens before the local controller becomes available.
+- Added quiet background reconnection for delayed DevTools endpoints.
+- Added a persistent debugging port per browser profile to improve reconnection across application launches.
+
 ## 0.5.1
 
 - Added Authenticode signing for both the application executable and the final installer.
