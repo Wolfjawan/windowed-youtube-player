@@ -1,5 +1,5 @@
 #define MyAppName "Windowed Streaming Player"
-#define MyAppVersion "0.4.0"
+#define MyAppVersion "0.5.0"
 #define MyAppPublisher "Wolfjawan"
 #define MyAppExeName "WindowedStreamingPlayer.exe"
 
@@ -35,7 +35,7 @@ Source: "..\artifacts\win-x64\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignorev
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
-Name: "{autoprograms}\{#MyAppName}\Change browser or website"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--settings"; WorkingDir: "{app}"
+Name: "{autoprograms}\{#MyAppName}\Choose browser"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--choose-browser"; WorkingDir: "{app}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
