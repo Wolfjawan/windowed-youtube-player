@@ -378,36 +378,69 @@ internal static class DevToolsController
             await socket.ConnectAsync(webSocketUri, cancellationToken);
 
             int id = 0;
+            HashSet<long> injectedContexts = [];
+
             await SendCommandAsync(socket, ++id, "Page.enable", null, cancellationToken);
             await SendCommandAsync(socket, ++id, "Runtime.enable", null, cancellationToken);
             await SendCommandAsync(
                 socket,
                 ++id,
                 "Page.addScriptToEvaluateOnNewDocument",
-                new { source = FullscreenInjection.Source },
-                cancellationToken);
-            await SendCommandAsync(
-                socket,
-                ++id,
-                "Runtime.evaluate",
                 new
                 {
-                    expression = FullscreenInjection.Source,
-                    awaitPromise = false,
-                    returnByValue = false
+                    source = FullscreenInjection.Source,
+                    runImmediately = true
                 },
                 cancellationToken);
+            await SendInjectionAsync(socket, ++id, null, cancellationToken);
 
-            byte[] buffer = new byte[64 * 1024];
             while (socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
             {
-                WebSocketReceiveResult result = await socket.ReceiveAsync(
-                    new ArraySegment<byte>(buffer),
-                    cancellationToken);
-
-                if (result.MessageType == WebSocketMessageType.Close)
+                string? message = await ReceiveTextMessageAsync(socket, cancellationToken);
+                if (message is null)
                 {
                     break;
+                }
+
+                try
+                {
+                    using JsonDocument document = JsonDocument.Parse(message);
+                    JsonElement root = document.RootElement;
+                    if (!root.TryGetProperty("method", out JsonElement methodElement))
+                    {
+                        continue;
+                    }
+
+                    string? method = methodElement.GetString();
+                    if (string.Equals(method, "Runtime.executionContextCreated", StringComparison.Ordinal))
+                    {
+                        if (!TryGetDefaultExecutionContext(root, out long contextId)
+                            || !injectedContexts.Add(contextId))
+                        {
+                            continue;
+                        }
+
+                        await SendInjectionAsync(
+                            socket,
+                            ++id,
+                            contextId,
+                            cancellationToken);
+                    }
+                    else if (string.Equals(method, "Runtime.executionContextDestroyed", StringComparison.Ordinal)
+                             && root.TryGetProperty("params", out JsonElement destroyedParams)
+                             && destroyedParams.TryGetProperty("executionContextId", out JsonElement destroyedId)
+                             && destroyedId.TryGetInt64(out long removedContextId))
+                    {
+                        injectedContexts.Remove(removedContextId);
+                    }
+                    else if (string.Equals(method, "Runtime.executionContextsCleared", StringComparison.Ordinal))
+                    {
+                        injectedContexts.Clear();
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Ignore unrelated or incomplete protocol messages.
                 }
             }
         }
@@ -419,6 +452,93 @@ internal static class DevToolsController
         {
             // The browser target was closed or navigated away.
         }
+    }
+
+    private static bool TryGetDefaultExecutionContext(JsonElement root, out long contextId)
+    {
+        contextId = 0;
+        if (!root.TryGetProperty("params", out JsonElement parameters)
+            || !parameters.TryGetProperty("context", out JsonElement context)
+            || !context.TryGetProperty("id", out JsonElement idElement)
+            || !idElement.TryGetInt64(out contextId))
+        {
+            return false;
+        }
+
+        if (context.TryGetProperty("auxData", out JsonElement auxiliaryData)
+            && auxiliaryData.TryGetProperty("isDefault", out JsonElement isDefault)
+            && isDefault.ValueKind is JsonValueKind.True or JsonValueKind.False
+            && !isDefault.GetBoolean())
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static Task SendInjectionAsync(
+        ClientWebSocket socket,
+        int id,
+        long? contextId,
+        CancellationToken cancellationToken)
+    {
+        object parameters = contextId.HasValue
+            ? new
+            {
+                expression = FullscreenInjection.Source,
+                contextId = contextId.Value,
+                awaitPromise = false,
+                returnByValue = false,
+                userGesture = true
+            }
+            : new
+            {
+                expression = FullscreenInjection.Source,
+                awaitPromise = false,
+                returnByValue = false,
+                userGesture = true
+            };
+
+        return SendCommandAsync(
+            socket,
+            id,
+            "Runtime.evaluate",
+            parameters,
+            cancellationToken);
+    }
+
+    private static async Task<string?> ReceiveTextMessageAsync(
+        ClientWebSocket socket,
+        CancellationToken cancellationToken)
+    {
+        byte[] buffer = new byte[64 * 1024];
+        using MemoryStream message = new();
+
+        while (socket.State == WebSocketState.Open)
+        {
+            WebSocketReceiveResult result = await socket.ReceiveAsync(
+                new ArraySegment<byte>(buffer),
+                cancellationToken);
+
+            if (result.MessageType == WebSocketMessageType.Close)
+            {
+                return null;
+            }
+
+            if (result.MessageType == WebSocketMessageType.Text && result.Count > 0)
+            {
+                message.Write(buffer, 0, result.Count);
+            }
+
+            if (result.EndOfMessage)
+            {
+                return result.MessageType == WebSocketMessageType.Text
+                    ? Encoding.UTF8.GetString(message.ToArray())
+                    : string.Empty;
+            }
+        }
+
+        return null;
     }
 
     private static async Task SendCommandAsync(
