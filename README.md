@@ -1,8 +1,18 @@
 # Windowed Streaming Player
 
-Windowed Streaming Player is an installable Windows application for opening YouTube, Crunchyroll, Prime Video, Netflix and other websites in separate, resizable Chromium app windows.
+Windowed Streaming Player is an installable Windows application for opening YouTube, Crunchyroll, Prime Video, Netflix and other websites in separate, resizable Chromium **app windows**.
 
 It is designed for ultrawide and large monitors where ordinary fullscreen takes over the entire display. A video can fill only its current app window while the window remains movable, resizable and compatible with Windows Snap.
+
+## Clean streaming windows
+
+Version 0.6.0 restores the direct app-window launch model used before the installer-era runtime rewrite.
+
+When you choose a service, the app launches the selected Chromium browser directly with `--app=<service URL>`. The streaming window therefore opens as an app window rather than as a normal browser window: there is no normal tab strip, address bar or New Tab UI surrounding the service.
+
+The app does not open `about:blank` first and does not use DevTools to navigate the window. Local DevTools access is used only after launch to install and maintain the window-fullscreen behaviour.
+
+Each selected browser keeps a dedicated persistent profile, so streaming logins, cookies and preferences remain available between launches.
 
 ## Responsive control center
 
@@ -15,7 +25,7 @@ The control center includes:
 - branded quick-launch cards
 - the currently selected browser and preferred website
 - File, Edit and Help menus
-- support for opening multiple streaming windows
+- support for opening multiple streaming app windows
 - keyboard-accessible cards with visible focus states
 
 Launching the application again brings the existing control center to the front.
@@ -24,7 +34,7 @@ Launching the application again brings the existing control center to the front.
 
 ### File
 
-- **New Window…** (`Ctrl+N`) — choose a preset or custom website and open it in another streaming window
+- **New Window…** (`Ctrl+N`) — choose a preset or custom website and open it in another streaming app window
 - **Open Preferred Website** (`Ctrl+Shift+N`)
 - **Exit**
 
@@ -39,40 +49,33 @@ Launching the application again brings the existing control center to the front.
 
 ## Window-only fullscreen
 
-Every new streaming window follows this sequence:
+The fullscreen button is intended to fill **the current streaming app window**, not the physical monitor.
 
-1. Open a blank Chromium app window.
-2. Connect the local DevTools controller.
-3. Install the window-fullscreen controller before website JavaScript runs.
-4. Navigate to the selected streaming service only after protection is active.
+Clicking the website's fullscreen button, pressing `F`, or double-clicking a visible video enters window-only fullscreen. `Esc`, `F` again, or the fullscreen button again restores the normal page.
 
-If the controller cannot be attached, the app refuses to load the website rather than opening an unprotected window that could take over the monitor.
+For YouTube, version 0.6.0 uses a dedicated fullscreen path: the existing YouTube player stays in its original document structure and is fixed over the app window. The live video element is not moved to a replacement DOM container, avoiding the black-video regression caused by relocating GPU-rendered playback surfaces.
 
-The Chromium Fullscreen API remains available to the player, but its methods are replaced before page load. A player fullscreen request is converted into the app's window-only mode rather than native monitor-wide fullscreen. Version 0.5.5 also repairs profiles written by v0.5.4 that had fullscreen capability disabled.
+Other streaming services use a generic fullscreen handler installed in page and iframe targets. Fullscreen API requests are redirected to the window-only layout, and embedded player frames can propagate their fullscreen state to the containing page.
 
-Fullscreen control is installed in the top page and embedded player frames. The app watches both page and iframe DevTools targets, including cross-origin frames used by streaming services.
-
-Clicking the website's fullscreen button, pressing `F`, or double-clicking a visible video expands the player only to the edges of its current app window. The Windows title bar and the window's position on the monitor remain under Windows control. Press `Esc`, click the fullscreen button again, or press `F` again to restore the page.
-
-The player remains in its original document structure and is temporarily pinned over a black backdrop. This avoids relocating YouTube's live video element, which can disrupt hardware-rendered video surfaces.
-
-Fullscreen buttons toggle on the completed click. The app does not consume the initial pointer-down event, which allows streaming controls to complete their normal interaction while the fullscreen API remains redirected to window-only mode.
+If the local fullscreen controller is briefly unavailable when a streaming app window opens, the website still opens normally and the controller retries quietly. Opening the streaming service is no longer dependent on a DevTools navigation step.
 
 ## Browser connection behaviour
 
-Each dedicated browser profile stores a stable local debugging port. New windows are prepared through that controller before navigation. Existing streaming sign-ins and preferences remain saved in the dedicated profile.
+Each dedicated browser profile stores a stable local debugging port. The browser is launched directly to the requested website in app mode; the local controller then attaches in the background solely to install fullscreen handling in current and future page/iframe targets.
+
+Version 0.6.0 also repairs the fullscreen preference written by v0.5.4 when reusing an existing dedicated profile.
 
 ## Private self-signed installation
 
-Version 0.5.5 signs both `WindowedStreamingPlayer.exe` and the final setup executable with Authenticode. Because this is a private self-signed build, Windows does not trust the certificate automatically.
+Version 0.6.0 signs both `WindowedStreamingPlayer.exe` and the final setup executable with Authenticode. Because this is a private self-signed build, Windows does not trust the certificate automatically.
 
 Use this order:
 
 1. Download `WindowedStreamingPlayer-PrivateTrust.zip` from the same release.
-2. Extract the ZIP.
+2. Extract it.
 3. Right-click `Trust-WindowedStreamingPlayer-Certificate.cmd` and choose **Run as administrator**.
 4. Confirm that the certificate was added to the Windows Trusted Root and Trusted Publishers stores.
-5. Download `WindowedStreamingPlayer-Setup-0.5.5.exe` after installing the certificate.
+5. Download `WindowedStreamingPlayer-Setup-0.6.0.exe` after installing the certificate.
 6. Run the installer.
 
 The release also includes the public `.cer` file and SHA-256 checksums.
@@ -121,7 +124,7 @@ Firefox is not currently supported because the application relies on Chromium ap
 
 ## Automated builds and releases
 
-GitHub Actions uses a GitHub-hosted Windows runner. Pull requests compile and sign a validation installer. When a pull request is merged into `main`, a separate merge-triggered job rebuilds the signed package, creates or updates the declared version release and verifies that the installer, trust ZIP, public certificate and checksum file are all present.
+GitHub Actions uses a GitHub-hosted Windows runner. Pull requests compile and sign a validation installer. When a pull request is merged into `main`, a merge-triggered job rebuilds the signed package, creates or updates the declared version release and verifies that the installer, trust ZIP, public certificate and checksum file are all present.
 
 ## Logo sources
 
