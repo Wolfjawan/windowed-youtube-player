@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.3
+
+- Fixed the compact control centre crashing at startup with `Control does not support transparent background colors`.
+- Enables WinForms transparent-background support before assigning transparent backgrounds to the compact service panel and icon buttons.
+- Added a Windows startup smoke test that constructs and lays out the real main window so future control-construction regressions are caught before merge.
+- Keeps the YouTube player/fullscreen implementation and Crunchyroll fullscreen guard unchanged.
+- Updated the private signed installer to version 0.6.3.
+
+## 0.6.2
+
+- Added a Crunchyroll-specific fullscreen gesture guard so its fullscreen control routes to window-only fullscreen instead of monitor-wide Chromium fullscreen.
+- Simplified the control centre to four compact icon-only launchers: YouTube, Crunchyroll, Prime Video and BBC iPlayer.
+- Removed Netflix, Disney+, the custom card, card descriptions/actions, extra hero copy, current setup panel and bottom status text from the home screen.
+- Kept File, Edit and Help menus for browser, preferred-site and additional-site access.
+- Kept the v0.6.1 YouTube fullscreen and YouTube chrome cleanup unchanged.
+- Updated the private signed installer to version 0.6.2.
+
 ## 0.6.1
 
 - Hides YouTube's masthead, hamburger/search navigation and page metadata while window-only fullscreen is active.
