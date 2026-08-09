@@ -1,5 +1,11 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
+using System.Net.WebSockets;
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace WindowedYouTubePlayer;
@@ -30,19 +36,23 @@ internal sealed class BrowserSessionManager : IDisposable
         {
             session.Dispose();
         }
-
         sessions.Clear();
     }
 }
 
 internal sealed class BrowserSession : IDisposable
 {
+    private const string DebuggingPortFileName = "wsp-debugging-port.txt";
+
     private readonly string browserName;
     private readonly string browserPath;
     private readonly string profileDirectory;
-    private readonly string extensionDirectory;
     private readonly SemaphoreSlim launchLock = new(1, 1);
-    private readonly List<Process> launchedProcesses = [];
+
+    private CancellationTokenSource? controllerCancellation;
+    private Task? controllerTask;
+    private Process? rootProcess;
+    private int debuggingPort;
     private bool disposed;
 
     public BrowserSession(string browserKey, string selectedBrowserName, string selectedBrowserPath)
@@ -52,13 +62,7 @@ internal sealed class BrowserSession : IDisposable
         profileDirectory = Path.Combine(
             AppPaths.ProfilesDirectory,
             SafeDirectoryName(browserKey));
-        extensionDirectory = Path.Combine(
-            AppPaths.RootDirectory,
-            "WindowFullscreenExtension");
-
         Directory.CreateDirectory(profileDirectory);
-        RepairLegacyProfile();
-        WindowFullscreenExtension.Install(extensionDirectory);
     }
 
     public async Task<BrowserLaunchResult> OpenAsync(string siteUrl)
@@ -69,18 +73,28 @@ internal sealed class BrowserSession : IDisposable
         try
         {
             RepairLegacyProfile();
-            WindowFullscreenExtension.Install(extensionDirectory);
+            debuggingPort = ResolveDebuggingPort();
+            bool endpointAvailable = await DevToolsController.IsEndpointAvailableAsync(debuggingPort);
 
-            Process? process = StartBrowser(siteUrl);
+            Process? process = StartBrowser(siteUrl, debuggingPort);
             if (process is null)
             {
                 throw new InvalidOperationException($"{browserName} did not open a new app window.");
             }
 
-            launchedProcesses.RemoveAll(process => process.HasExited);
-            launchedProcesses.Add(process);
+            if (rootProcess is null || rootProcess.HasExited)
+            {
+                rootProcess?.Dispose();
+                rootProcess = process;
+            }
 
-            return new BrowserLaunchResult(true, true);
+            bool connected = endpointAvailable || await DevToolsController.TryWaitUntilAvailableAsync(
+                debuggingPort,
+                TimeSpan.FromSeconds(8),
+                CancellationToken.None);
+
+            EnsureControllerMonitor(startWithRecovery: !connected);
+            return new BrowserLaunchResult(true, connected);
         }
         finally
         {
@@ -90,37 +104,52 @@ internal sealed class BrowserSession : IDisposable
 
     public void Dispose()
     {
-        if (disposed)
-        {
-            return;
-        }
-
+        if (disposed) return;
         disposed = true;
+        controllerCancellation?.Cancel();
 
-        foreach (Process process in launchedProcesses.ToArray())
+        try
         {
-            try
+            if (rootProcess is not null && !rootProcess.HasExited)
             {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch
-            {
-                // The dedicated app window may already have been closed by the user.
-            }
-            finally
-            {
-                process.Dispose();
+                rootProcess.Kill(entireProcessTree: true);
             }
         }
+        catch
+        {
+            // The dedicated browser process may already be closed.
+        }
 
-        launchedProcesses.Clear();
+        controllerCancellation?.Dispose();
+        rootProcess?.Dispose();
         launchLock.Dispose();
     }
 
-    private Process? StartBrowser(string siteUrl)
+    private void EnsureControllerMonitor(bool startWithRecovery)
+    {
+        if (controllerTask is { IsCompleted: false }) return;
+
+        controllerCancellation?.Cancel();
+        controllerCancellation?.Dispose();
+        controllerCancellation = new CancellationTokenSource();
+        CancellationToken token = controllerCancellation.Token;
+
+        controllerTask = Task.Run(async () =>
+        {
+            if (startWithRecovery)
+            {
+                bool recovered = await DevToolsController.TryWaitUntilAvailableAsync(
+                    debuggingPort,
+                    TimeSpan.FromMinutes(2),
+                    token);
+                if (!recovered) return;
+            }
+
+            await DevToolsController.MonitorAsync(debuggingPort, token);
+        }, token);
+    }
+
+    private Process? StartBrowser(string siteUrl, int port)
     {
         ProcessStartInfo startInfo = new(browserPath)
         {
@@ -128,10 +157,13 @@ internal sealed class BrowserSession : IDisposable
             WorkingDirectory = Path.GetDirectoryName(browserPath) ?? Environment.CurrentDirectory
         };
 
-        // Match the last known-good pre-installer runtime: direct app mode plus a
-        // local unpacked extension. No remote-debugging flags and no about:blank hop.
+        // Restore the pre-installer launch shape: navigate directly in Chromium app mode.
+        // DevTools remains local-only and is used after launch solely to install the
+        // window-fullscreen script; it no longer controls navigation or window creation.
         startInfo.ArgumentList.Add($"--user-data-dir={profileDirectory}");
-        startInfo.ArgumentList.Add($"--load-extension={extensionDirectory}");
+        startInfo.ArgumentList.Add($"--remote-debugging-port={port}");
+        startInfo.ArgumentList.Add("--remote-debugging-address=127.0.0.1");
+        startInfo.ArgumentList.Add("--remote-allow-origins=http://127.0.0.1");
         startInfo.ArgumentList.Add($"--app={siteUrl}");
         startInfo.ArgumentList.Add("--new-window");
         startInfo.ArgumentList.Add("--window-size=1280,720");
@@ -146,27 +178,19 @@ internal sealed class BrowserSession : IDisposable
     private void RepairLegacyProfile()
     {
         string preferencesPath = Path.Combine(profileDirectory, "Default", "Preferences");
-        if (!File.Exists(preferencesPath))
-        {
-            return;
-        }
+        if (!File.Exists(preferencesPath)) return;
 
         try
         {
             JsonNode? parsed = JsonNode.Parse(File.ReadAllText(preferencesPath));
-            if (parsed is not JsonObject root)
-            {
-                return;
-            }
-
+            if (parsed is not JsonObject root) return;
             SetBoolean(root, true, "fullscreen", "allowed");
             SetBoolean(root, true, "apps", "fullscreen", "allowed");
             File.WriteAllText(preferencesPath, root.ToJsonString());
         }
         catch
         {
-            // Profile repair is only for v0.5.4/v0.5.5 compatibility. The direct
-            // app-mode launch remains usable when Chromium owns or rewrites this file.
+            // Only repairs settings written by v0.5.4. Chromium may own this file.
         }
     }
 
@@ -183,8 +207,31 @@ internal sealed class BrowserSession : IDisposable
             }
             current = child;
         }
-
         current[path[^1]] = value;
+    }
+
+    private int ResolveDebuggingPort()
+    {
+        string path = Path.Combine(profileDirectory, DebuggingPortFileName);
+        try
+        {
+            if (File.Exists(path)
+                && int.TryParse(File.ReadAllText(path), out int saved)
+                && saved is >= 1024 and <= 65535)
+            {
+                return saved;
+            }
+        }
+        catch {}
+
+        TcpListener listener = new(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+
+        try { File.WriteAllText(path, port.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+        catch {}
+        return port;
     }
 
     private static string SafeDirectoryName(string value)
@@ -192,5 +239,187 @@ internal sealed class BrowserSession : IDisposable
         char[] invalid = Path.GetInvalidFileNameChars();
         string safe = new(value.Where(character => !invalid.Contains(character)).ToArray());
         return string.IsNullOrWhiteSpace(safe) ? "custom" : safe;
+    }
+}
+
+internal sealed class DevToolsTarget
+{
+    public string? Id { get; set; }
+    public string? Type { get; set; }
+    public string? Url { get; set; }
+    public string? WebSocketDebuggerUrl { get; set; }
+}
+
+internal static class DevToolsController
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    public static async Task<bool> IsEndpointAvailableAsync(int port)
+    {
+        using HttpClient client = CreateHttpClient();
+        try
+        {
+            using HttpResponseMessage response = await client.GetAsync($"http://127.0.0.1:{port}/json/version");
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static async Task<bool> TryWaitUntilAvailableAsync(
+        int port,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        DateTime deadline = DateTime.UtcNow.Add(timeout);
+        while (DateTime.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
+        {
+            if (await IsEndpointAvailableAsync(port)) return true;
+            try { await Task.Delay(200, cancellationToken); }
+            catch (OperationCanceledException) { return false; }
+        }
+        return false;
+    }
+
+    public static async Task MonitorAsync(int port, CancellationToken cancellationToken)
+    {
+        using HttpClient client = CreateHttpClient();
+        Dictionary<string, Task> activeTargets = new(StringComparer.Ordinal);
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            IReadOnlyList<DevToolsTarget> targets = await GetControlledTargetsAsync(client, port);
+            foreach (DevToolsTarget target in targets)
+            {
+                if (string.IsNullOrWhiteSpace(target.Id)
+                    || string.IsNullOrWhiteSpace(target.WebSocketDebuggerUrl)
+                    || activeTargets.ContainsKey(target.Id))
+                {
+                    continue;
+                }
+
+                activeTargets[target.Id] = RunTargetSessionAsync(
+                    new Uri(target.WebSocketDebuggerUrl),
+                    cancellationToken);
+            }
+
+            foreach (string completedId in activeTargets
+                         .Where(pair => pair.Value.IsCompleted)
+                         .Select(pair => pair.Key)
+                         .ToArray())
+            {
+                activeTargets.Remove(completedId);
+            }
+
+            try { await Task.Delay(250, cancellationToken); }
+            catch (OperationCanceledException) { break; }
+        }
+    }
+
+    private static HttpClient CreateHttpClient() => new()
+    {
+        Timeout = TimeSpan.FromSeconds(2)
+    };
+
+    private static async Task<IReadOnlyList<DevToolsTarget>> GetControlledTargetsAsync(
+        HttpClient client,
+        int port)
+    {
+        try
+        {
+            string json = await client.GetStringAsync($"http://127.0.0.1:{port}/json/list");
+            List<DevToolsTarget>? targets = JsonSerializer.Deserialize<List<DevToolsTarget>>(json, JsonOptions);
+            return targets?
+                .Where(target =>
+                    (string.Equals(target.Type, "page", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(target.Type, "iframe", StringComparison.OrdinalIgnoreCase))
+                    && !string.IsNullOrWhiteSpace(target.Id)
+                    && !string.IsNullOrWhiteSpace(target.WebSocketDebuggerUrl)
+                    && target.Url is not null
+                    && (target.Url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                        || target.Url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+                .ToArray()
+                ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static async Task RunTargetSessionAsync(
+        Uri webSocketUri,
+        CancellationToken cancellationToken)
+    {
+        using ClientWebSocket socket = new();
+        socket.Options.SetRequestHeader("Origin", "http://127.0.0.1");
+
+        try
+        {
+            await socket.ConnectAsync(webSocketUri, cancellationToken);
+            int id = 0;
+
+            await SendCommandAsync(socket, ++id, "Page.enable", null, cancellationToken);
+            await SendCommandAsync(socket, ++id, "Runtime.enable", null, cancellationToken);
+            await SendCommandAsync(
+                socket,
+                ++id,
+                "Page.addScriptToEvaluateOnNewDocument",
+                new { source = WindowFullscreenRuntime.Source, runImmediately = true },
+                cancellationToken);
+            await SendCommandAsync(
+                socket,
+                ++id,
+                "Runtime.evaluate",
+                new
+                {
+                    expression = WindowFullscreenRuntime.Source,
+                    awaitPromise = false,
+                    returnByValue = false,
+                    userGesture = true
+                },
+                cancellationToken);
+
+            byte[] buffer = new byte[16 * 1024];
+            while (socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
+            {
+                WebSocketReceiveResult result = await socket.ReceiveAsync(
+                    new ArraySegment<byte>(buffer),
+                    cancellationToken);
+                if (result.MessageType == WebSocketMessageType.Close) break;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown.
+        }
+        catch (WebSocketException)
+        {
+            // Target closed or navigated away; monitor will attach again if necessary.
+        }
+    }
+
+    private static async Task SendCommandAsync(
+        ClientWebSocket socket,
+        int id,
+        string method,
+        object? parameters,
+        CancellationToken cancellationToken)
+    {
+        object payload = parameters is null
+            ? new { id, method }
+            : new { id, method, @params = parameters };
+
+        byte[] bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload));
+        await socket.SendAsync(
+            new ArraySegment<byte>(bytes),
+            WebSocketMessageType.Text,
+            true,
+            cancellationToken);
     }
 }
