@@ -13,21 +13,23 @@ internal static class WindowFullscreenRuntime
             || host.endsWith('.youtube.com')
             || host === 'youtu.be';
 
-          if (isYouTube && window.top === window.self) {
-            installYouTube();
-            return;
-          }
-
-          installGeneric();
+          if (isYouTube && window.top === window.self) installYouTube();
+          else installGeneric();
 
           function installYouTube() {
-            const rootClass = 'wyp-window-fullscreen';
-            const overlayId = 'wyp-player-overlay';
-            let resizeFrame = 0;
-            let originalParent = null;
-            let originalNextSibling = null;
-            let playerStyleSnapshot = null;
-            let videoStyleSnapshot = null;
+            const rootClass = 'wsp-youtube-window-fullscreen';
+            const targetClass = 'wsp-youtube-window-target';
+            const maximumZ = '2147483647';
+            let state = null;
+
+            const nativeRequestFullscreen = Element.prototype.requestFullscreen;
+            const nativeExitFullscreen = Document.prototype.exitFullscreen;
+            const nativeFullscreenElement = Object.getOwnPropertyDescriptor(
+              Document.prototype, 'fullscreenElement');
+            const nativeFullscreenEnabled = Object.getOwnPropertyDescriptor(
+              Document.prototype, 'fullscreenEnabled');
+            const nativeWebkitFullscreenElement = Object.getOwnPropertyDescriptor(
+              Document.prototype, 'webkitFullscreenElement');
 
             const style = document.createElement('style');
             style.textContent = `
@@ -38,24 +40,35 @@ internal static class WindowFullscreenRuntime
                 overflow: hidden !important;
                 background: #000 !important;
               }
-              #${overlayId} {
+              .${targetClass} {
                 position: fixed !important;
                 inset: 0 !important;
-                z-index: 2147483647 !important;
+                left: 0 !important;
+                top: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
                 width: 100vw !important;
                 height: 100vh !important;
+                min-width: 0 !important;
+                min-height: 0 !important;
+                max-width: none !important;
+                max-height: none !important;
                 margin: 0 !important;
                 padding: 0 !important;
-                overflow: hidden !important;
+                border: 0 !important;
+                transform: none !important;
+                z-index: ${maximumZ} !important;
+                box-sizing: border-box !important;
                 background: #000 !important;
+                overflow: hidden !important;
+                visibility: visible !important;
+                opacity: 1 !important;
                 isolation: isolate !important;
               }
-              #${overlayId} > #movie_player,
-              #${overlayId} > .html5-video-player {
+              .${targetClass} .html5-video-container,
+              .${targetClass} .ytp-player-content {
                 position: absolute !important;
                 inset: 0 !important;
-                z-index: 1 !important;
-                box-sizing: border-box !important;
                 width: 100% !important;
                 height: 100% !important;
                 min-width: 0 !important;
@@ -65,22 +78,10 @@ internal static class WindowFullscreenRuntime
                 margin: 0 !important;
                 padding: 0 !important;
                 transform: none !important;
-                background: #000 !important;
-              }
-              #${overlayId} .html5-video-container {
-                position: absolute !important;
-                inset: 0 !important;
-                width: 100% !important;
-                height: 100% !important;
-                max-width: none !important;
-                max-height: none !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                transform: none !important;
                 overflow: hidden !important;
                 background: #000 !important;
               }
-              #${overlayId} video.html5-main-video {
+              .${targetClass} video.html5-main-video {
                 position: absolute !important;
                 inset: 0 !important;
                 left: 0 !important;
@@ -94,13 +95,9 @@ internal static class WindowFullscreenRuntime
                 object-fit: contain !important;
                 background: #000 !important;
               }
-              #${overlayId} .ytp-chrome-bottom {
+              .${targetClass} .ytp-chrome-bottom {
                 left: 12px !important;
                 width: calc(100% - 24px) !important;
-              }
-              #${overlayId} .ytp-gradient-bottom,
-              #${overlayId} .ytp-gradient-top {
-                width: 100% !important;
               }
             `;
             (document.head || document.documentElement).appendChild(style);
@@ -111,119 +108,153 @@ internal static class WindowFullscreenRuntime
             const isWatchPage = () => location.pathname === '/watch'
               || location.pathname.startsWith('/live/')
               || location.pathname.startsWith('/shorts/');
-            const isWindowFullscreen = () => document.documentElement.classList.contains(rootClass);
-            const isEditableTarget = target => target instanceof Element && (
-              target.matches('input, textarea, select, [contenteditable="true"]')
-              || Boolean(target.closest('input, textarea, select, [contenteditable="true"]'))
-            );
+            const isEditable = target => target instanceof Element && Boolean(
+              target.closest('input, textarea, select, [contenteditable="true"]'));
 
-            function updateFullscreenButtons() {
-              const label = isWindowFullscreen()
-                ? 'Exit window fullscreen (Esc)'
-                : 'Fill this window (F)';
+            function saveStyle(element) {
+              return { element, style: element.getAttribute('style') };
+            }
+
+            function restoreStyle(saved) {
+              if (saved.style === null) saved.element.removeAttribute('style');
+              else saved.element.setAttribute('style', saved.style);
+            }
+
+            function unlockAncestors(target) {
+              const saved = [];
+              let node = target.parentElement;
+              while (node) {
+                saved.push(saveStyle(node));
+                node.style.setProperty('overflow', 'visible', 'important');
+                node.style.setProperty('overflow-x', 'visible', 'important');
+                node.style.setProperty('overflow-y', 'visible', 'important');
+                node.style.setProperty('transform', 'none', 'important');
+                node.style.setProperty('translate', 'none', 'important');
+                node.style.setProperty('scale', 'none', 'important');
+                node.style.setProperty('rotate', 'none', 'important');
+                node.style.setProperty('filter', 'none', 'important');
+                node.style.setProperty('perspective', 'none', 'important');
+                node.style.setProperty('contain', 'none', 'important');
+                node.style.setProperty('clip', 'auto', 'important');
+                node.style.setProperty('clip-path', 'none', 'important');
+                if (node === document.documentElement) break;
+                node = node.parentElement;
+              }
+              return saved;
+            }
+
+            function updateButtons() {
+              const label = state ? 'Exit window fullscreen (Esc)' : 'Fill this window (F)';
               document.querySelectorAll('.ytp-fullscreen-button').forEach(button => {
                 button.setAttribute('title', label);
                 button.setAttribute('aria-label', label);
               });
             }
 
-            function snapshotStyle(element) {
-              return element?.hasAttribute('style') ? element.getAttribute('style') : null;
+            function applyLayout() {
+              if (!state) return;
+              const player = state.target;
+              player.style.setProperty('position', 'fixed', 'important');
+              player.style.setProperty('inset', '0', 'important');
+              player.style.setProperty('width', `${window.innerWidth}px`, 'important');
+              player.style.setProperty('height', `${window.innerHeight}px`, 'important');
+              player.style.setProperty('z-index', maximumZ, 'important');
+              player.style.setProperty('transform', 'none', 'important');
+
+              const video = player.querySelector('video.html5-main-video');
+              if (video) {
+                video.style.setProperty('width', '100%', 'important');
+                video.style.setProperty('height', '100%', 'important');
+                video.style.setProperty('left', '0', 'important');
+                video.style.setProperty('top', '0', 'important');
+                video.style.setProperty('transform', 'none', 'important');
+              }
+
+              if (typeof player.setSize === 'function') {
+                try { player.setSize(window.innerWidth, window.innerHeight); } catch {}
+              }
+              window.dispatchEvent(new Event('resize'));
             }
 
-            function restoreStyle(element, snapshot) {
-              if (!element) return;
-              if (snapshot === null) element.removeAttribute('style');
-              else element.setAttribute('style', snapshot);
-            }
-
-            function refreshPlayerSize() {
-              window.cancelAnimationFrame(resizeFrame);
-              resizeFrame = window.requestAnimationFrame(() => {
-                if (!isWindowFullscreen()) return;
-                const overlay = document.getElementById(overlayId);
-                const player = overlay?.querySelector('#movie_player, .html5-video-player');
-                if (!player) return;
-
-                player.style.setProperty('width', `${window.innerWidth}px`, 'important');
-                player.style.setProperty('height', `${window.innerHeight}px`, 'important');
-                player.style.setProperty('left', '0', 'important');
-                player.style.setProperty('top', '0', 'important');
-
-                const video = player.querySelector('video.html5-main-video');
-                if (video) {
-                  video.style.setProperty('width', '100%', 'important');
-                  video.style.setProperty('height', '100%', 'important');
-                  video.style.setProperty('left', '0', 'important');
-                  video.style.setProperty('top', '0', 'important');
-                  video.style.setProperty('transform', 'none', 'important');
-                }
-
-                if (typeof player.setSize === 'function') {
-                  try { player.setSize(window.innerWidth, window.innerHeight); } catch {}
-                }
+            function dispatchFullscreenChange(target) {
+              queueMicrotask(() => {
+                try { target?.dispatchEvent(new Event('fullscreenchange', { bubbles: true })); } catch {}
               });
             }
 
-            function enterWindowFullscreen() {
+            function enter() {
+              if (state) return Promise.resolve();
               const player = playerElement();
-              if (!document.body || !isWatchPage() || !player) return Promise.resolve();
-              if (document.getElementById(overlayId)) {
-                refreshPlayerSize();
-                return Promise.resolve();
-              }
+              if (!player || !isWatchPage()) return Promise.resolve();
 
-              originalParent = player.parentNode;
-              originalNextSibling = player.nextSibling;
-              playerStyleSnapshot = snapshotStyle(player);
-              videoStyleSnapshot = snapshotStyle(player.querySelector('video.html5-main-video'));
+              state = {
+                target: player,
+                targetStyle: saveStyle(player),
+                ancestorStyles: unlockAncestors(player),
+                scrollX: window.scrollX,
+                scrollY: window.scrollY
+              };
 
-              const overlay = document.createElement('div');
-              overlay.id = overlayId;
-              document.body.appendChild(overlay);
-              overlay.appendChild(player);
-
+              player.classList.add(targetClass);
               document.documentElement.classList.add(rootClass);
-              document.body.classList.add(rootClass);
-              updateFullscreenButtons();
-              refreshPlayerSize();
-              window.setTimeout(refreshPlayerSize, 80);
-              window.setTimeout(refreshPlayerSize, 300);
-              window.dispatchEvent(new Event('resize'));
+              document.body?.classList.add(rootClass);
+              applyLayout();
+              requestAnimationFrame(applyLayout);
+              window.setTimeout(applyLayout, 80);
+              window.setTimeout(applyLayout, 300);
+              updateButtons();
+              dispatchFullscreenChange(player);
               return Promise.resolve();
             }
 
-            function exitWindowFullscreen() {
-              const overlay = document.getElementById(overlayId);
-              const player = overlay?.querySelector('#movie_player, .html5-video-player');
-              const video = player?.querySelector('video.html5-main-video');
-
+            function exit() {
+              if (!state) return Promise.resolve();
+              const current = state;
+              state = null;
+              current.target.classList.remove(targetClass);
+              restoreStyle(current.targetStyle);
+              current.ancestorStyles.reverse().forEach(restoreStyle);
               document.documentElement.classList.remove(rootClass);
               document.body?.classList.remove(rootClass);
-
-              if (player && originalParent) {
-                if (originalNextSibling && originalNextSibling.parentNode === originalParent) {
-                  originalParent.insertBefore(player, originalNextSibling);
-                } else {
-                  originalParent.appendChild(player);
-                }
-              }
-
-              restoreStyle(player, playerStyleSnapshot);
-              restoreStyle(video, videoStyleSnapshot);
-              overlay?.remove();
-              originalParent = null;
-              originalNextSibling = null;
-              playerStyleSnapshot = null;
-              videoStyleSnapshot = null;
-              updateFullscreenButtons();
-              window.setTimeout(() => window.dispatchEvent(new Event('resize')), 0);
+              window.scrollTo(current.scrollX, current.scrollY);
+              window.dispatchEvent(new Event('resize'));
+              updateButtons();
+              dispatchFullscreenChange(current.target);
               return Promise.resolve();
             }
 
-            const toggleWindowFullscreen = () => isWindowFullscreen()
-              ? exitWindowFullscreen()
-              : enterWindowFullscreen();
+            function toggle() {
+              return state ? exit() : enter();
+            }
+
+            function defineGetter(name, descriptor, activeValue) {
+              try {
+                Object.defineProperty(Document.prototype, name, {
+                  configurable: true,
+                  enumerable: descriptor?.enumerable ?? true,
+                  get() {
+                    if (state) return activeValue();
+                    return descriptor?.get?.call(this) ?? null;
+                  }
+                });
+              } catch {}
+            }
+
+            defineGetter('fullscreenElement', nativeFullscreenElement, () => state.target);
+            defineGetter('webkitFullscreenElement', nativeWebkitFullscreenElement, () => state.target);
+            defineGetter('fullscreenEnabled', nativeFullscreenEnabled, () => true);
+
+            try {
+              Element.prototype.requestFullscreen = function() { return enter(); };
+            } catch {}
+            for (const name of ['webkitRequestFullscreen', 'webkitRequestFullScreen']) {
+              try { Element.prototype[name] = function() { return enter(); }; } catch {}
+            }
+            try {
+              Document.prototype.exitFullscreen = function() {
+                return state ? exit() : (nativeExitFullscreen?.call(this) || Promise.resolve());
+              };
+            } catch {}
 
             document.addEventListener('click', event => {
               const button = event.target instanceof Element
@@ -233,7 +264,7 @@ internal static class WindowFullscreenRuntime
               event.preventDefault();
               event.stopPropagation();
               event.stopImmediatePropagation();
-              toggleWindowFullscreen();
+              toggle();
             }, true);
 
             document.addEventListener('dblclick', event => {
@@ -242,69 +273,61 @@ internal static class WindowFullscreenRuntime
               event.preventDefault();
               event.stopPropagation();
               event.stopImmediatePropagation();
-              toggleWindowFullscreen();
+              toggle();
             }, true);
 
             document.addEventListener('keydown', event => {
-              if (event.key === 'Escape' && isWindowFullscreen()) {
+              if (event.key === 'Escape' && state) {
                 event.preventDefault();
-                event.stopPropagation();
                 event.stopImmediatePropagation();
-                exitWindowFullscreen();
+                exit();
                 return;
               }
-
               if (event.key.toLowerCase() === 'f'
                 && !event.ctrlKey && !event.altKey && !event.metaKey
-                && !isEditableTarget(event.target) && isWatchPage() && playerElement()) {
+                && !isEditable(event.target) && isWatchPage() && playerElement()) {
                 event.preventDefault();
-                event.stopPropagation();
                 event.stopImmediatePropagation();
-                toggleWindowFullscreen();
+                toggle();
               }
             }, true);
 
-            document.addEventListener('fullscreenchange', () => {
-              if (!document.fullscreenElement) return;
-              const target = document.fullscreenElement;
-              document.exitFullscreen().catch(() => {}).finally(() => {
-                if (!isWindowFullscreen()) enterWindowFullscreen(target);
-              });
+            document.addEventListener('fullscreenchange', event => {
+              let nativeTarget = null;
+              try { nativeTarget = nativeFullscreenElement?.get?.call(document) || null; } catch {}
+              if (!nativeTarget || state) return;
+              event.stopImmediatePropagation();
+              Promise.resolve(nativeExitFullscreen?.call(document))
+                .catch(() => {})
+                .finally(enter);
             }, true);
 
-            window.addEventListener('resize', () => {
-              if (isWindowFullscreen()) refreshPlayerSize();
-            });
-
-            window.addEventListener('yt-navigate-start', () => {
-              if (isWindowFullscreen()) exitWindowFullscreen();
-            });
-
-            window.addEventListener('yt-navigate-finish', () => {
-              window.setTimeout(updateFullscreenButtons, 250);
-            });
+            window.addEventListener('resize', () => { if (state) applyLayout(); });
+            window.addEventListener('yt-navigate-start', () => { if (state) exit(); });
+            window.addEventListener('yt-navigate-finish', () => window.setTimeout(updateButtons, 250));
 
             const observer = new MutationObserver(() => {
-              updateFullscreenButtons();
-              if (isWindowFullscreen()) refreshPlayerSize();
+              updateButtons();
+              if (state && !state.target.isConnected) exit();
             });
-
-            const beginObserving = () => {
-              if (!document.documentElement) {
-                window.setTimeout(beginObserving, 20);
-                return;
-              }
+            const begin = () => {
+              if (!document.documentElement) return window.setTimeout(begin, 20);
               observer.observe(document.documentElement, { childList: true, subtree: true });
-              updateFullscreenButtons();
+              updateButtons();
             };
-
-            beginObserving();
+            begin();
           }
 
           function installGeneric() {
             const rootClass = 'wsp-generic-window-fullscreen';
             const targetClass = 'wsp-generic-window-target';
+            const marker = '__wspWindowFullscreenV6';
             let state = null;
+
+            const nativeRequestFullscreen = Element.prototype.requestFullscreen;
+            const nativeExitFullscreen = Document.prototype.exitFullscreen;
+            const nativeFullscreenElement = Object.getOwnPropertyDescriptor(
+              Document.prototype, 'fullscreenElement');
 
             const style = document.createElement('style');
             style.textContent = `
@@ -328,6 +351,8 @@ internal static class WindowFullscreenRuntime
                 z-index: 2147483647 !important;
                 background: #000 !important;
                 overflow: hidden !important;
+                visibility: visible !important;
+                opacity: 1 !important;
               }
               .${targetClass} video,
               .${targetClass} canvas {
@@ -358,6 +383,7 @@ internal static class WindowFullscreenRuntime
             }
 
             function chooseTarget(requested) {
+              if (requested instanceof HTMLIFrameElement || requested instanceof HTMLFrameElement) return requested;
               if (requested instanceof Element) {
                 if (requested.matches('video')) return requested.parentElement || requested;
                 if (requested.querySelector?.('video')) return requested;
@@ -386,6 +412,11 @@ internal static class WindowFullscreenRuntime
               else element.setAttribute('style', value);
             }
 
+            function notifyParent(type) {
+              if (window.parent === window) return;
+              try { window.parent.postMessage({ [marker]: true, type }, '*'); } catch {}
+            }
+
             function enter(requested) {
               if (state) return Promise.resolve();
               const target = chooseTarget(requested);
@@ -395,6 +426,7 @@ internal static class WindowFullscreenRuntime
               document.documentElement.classList.add(rootClass);
               document.body?.classList.add(rootClass);
               window.dispatchEvent(new Event('resize'));
+              notifyParent('enter-child');
               return Promise.resolve();
             }
 
@@ -407,6 +439,7 @@ internal static class WindowFullscreenRuntime
               document.documentElement.classList.remove(rootClass);
               document.body?.classList.remove(rootClass);
               window.dispatchEvent(new Event('resize'));
+              notifyParent('exit-child');
               return Promise.resolve();
             }
 
@@ -414,14 +447,29 @@ internal static class WindowFullscreenRuntime
               return state ? exit() : enter(requested);
             }
 
-            try {
-              Element.prototype.requestFullscreen = function() { return enter(this); };
-            } catch {}
+            function childFrameFor(source) {
+              try {
+                return Array.from(document.querySelectorAll('iframe, frame'))
+                  .find(frame => frame.contentWindow === source) || null;
+              } catch { return null; }
+            }
+
+            window.addEventListener('message', event => {
+              if (!event.data?.[marker]) return;
+              const frame = childFrameFor(event.source);
+              if (!frame) return;
+              if (event.data.type === 'enter-child') enter(frame);
+              else if (event.data.type === 'exit-child') exit();
+            }, true);
+
+            try { Element.prototype.requestFullscreen = function() { return enter(this); }; } catch {}
             for (const name of ['webkitRequestFullscreen', 'webkitRequestFullScreen']) {
               try { Element.prototype[name] = function() { return enter(this); }; } catch {}
             }
             try {
-              Document.prototype.exitFullscreen = function() { return state ? exit() : Promise.resolve(); };
+              Document.prototype.exitFullscreen = function() {
+                return state ? exit() : (nativeExitFullscreen?.call(this) || Promise.resolve());
+              };
             } catch {}
 
             const selectors = [
@@ -477,13 +525,19 @@ internal static class WindowFullscreenRuntime
               }
             }, true);
 
-            document.addEventListener('fullscreenchange', () => {
-              if (!document.fullscreenElement) return;
-              const target = document.fullscreenElement;
-              Promise.resolve(document.exitFullscreen?.())
+            document.addEventListener('fullscreenchange', event => {
+              let nativeTarget = null;
+              try { nativeTarget = nativeFullscreenElement?.get?.call(document) || null; } catch {}
+              if (!nativeTarget || state) return;
+              event.stopImmediatePropagation();
+              Promise.resolve(nativeExitFullscreen?.call(document))
                 .catch(() => {})
-                .finally(() => enter(target));
+                .finally(() => enter(nativeTarget));
             }, true);
+
+            window.__wspWindowFullscreenV6 = {
+              enter, exit, toggle, isActive: () => Boolean(state), nativeRequestFullscreen
+            };
           }
         })();
         """;
