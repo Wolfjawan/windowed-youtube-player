@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1
+
+- Hides YouTube's masthead, hamburger/search navigation and page metadata while window-only fullscreen is active.
+- Hides Shorts/reel metadata overlays and watch-page content below the player during window-only fullscreen.
+- Restores all YouTube page chrome automatically when leaving window-only fullscreen.
+- Keeps the v0.6.0 direct Chromium app-window launch and fullscreen sizing unchanged.
+- Updated the private signed installer to version 0.6.1.
+
 ## 0.6.0
 
 - Restored direct Chromium app-mode launching from the last known-good pre-installer architecture.
@@ -56,10 +64,10 @@
 
 ## 0.5.1
 
-- Added Authenticode signing for both the application executable and the final installer.
-- Added signature verification to the GitHub Actions build.
-- Added a private-build self-signed certificate trust package.
-- Added a certificate installation helper for Windows Trusted Root and Trusted Publishers stores.
+- Added Authenticode signing for both the application executable and final installer.
+- Added signature verification to GitHub Actions build.
+- Added private-build self-signed certificate trust package.
+- Added certificate installation helper for Windows Trusted Root and Trusted Publishers stores.
 - Added release checksums covering the installer, certificate and trust package.
 - Supports an optional persistent signing PFX through encrypted GitHub secrets; otherwise each build creates a build-specific private certificate.
 
