@@ -1,5 +1,5 @@
 #define MyAppName "Windowed Streaming Player"
-#define MyAppVersion "0.6.2"
+#define MyAppVersion "0.6.3"
 #define MyAppPublisher "Wolfjawan"
 #define MyAppExeName "WindowedStreamingPlayer.exe"
 
