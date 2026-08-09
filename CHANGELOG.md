@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0
+
+- Restored direct Chromium app-mode launching from the last known-good pre-installer architecture.
+- Streaming sites now open directly with `--app=<site>` instead of opening `about:blank` and navigating later through DevTools.
+- Removed the v0.4-v0.5 fail-closed navigation controller and profile-level fullscreen policy from the runtime.
+- Restored the proven v0.3.0 YouTube window-fullscreen implementation for the fullscreen button, `F`, double-click and `Esc`.
+- Keeps local DevTools only as a background script injector so current Chrome versions remain supported without the removed `--load-extension` command-line flag.
+- Keeps the custom per-browser profile and existing streaming sign-ins.
+- Repairs the legacy fullscreen preference written by v0.5.4 before opening a window.
+- Keeps the responsive branded control centre, multi-service launcher, installer and self-signing pipeline.
+- Updated the private signed installer to version 0.6.0.
+
 ## 0.5.5
 
 - Restored the streaming players' fullscreen controls after v0.5.4 prevented them from filling the app window.
