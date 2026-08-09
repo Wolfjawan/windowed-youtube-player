@@ -11,11 +11,11 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon Condition="Exists('app.ico')">app.ico</ApplicationIcon>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <Version>0.5.5</Version>
-    <AssemblyVersion>0.5.5.0</AssemblyVersion>
-    <FileVersion>0.5.5.0</FileVersion>
+    <Version>0.6.0</Version>
+    <AssemblyVersion>0.6.0.0</AssemblyVersion>
+    <FileVersion>0.6.0.0</FileVersion>
     <Product>Windowed Streaming Player</Product>
-    <Description>Open streaming websites in resizable Chromium app windows with reliable window-only video fullscreen.</Description>
+    <Description>Open streaming websites in clean resizable Chromium app windows with extension-based window-only fullscreen.</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,10 +24,7 @@
     <Compile Include="BrandUi.cs" />
     <Compile Include="BrowserSetup.cs" />
     <Compile Include="SiteSetup.cs" />
-    <Compile Include="BrowserProfilePolicy.cs" />
     <Compile Include="BrowserControl.cs" />
-    <Compile Include="FullscreenInjection.cs" />
-    <Compile Include="FullscreenSafetyInjection.cs" />
-    <Compile Include="FullscreenScripts.cs" />
+    <Compile Include="WindowFullscreenExtension.cs" />
   </ItemGroup>
 </Project>
