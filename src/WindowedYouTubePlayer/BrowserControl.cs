@@ -363,6 +363,9 @@ internal static class DevToolsController
         {
             await socket.ConnectAsync(webSocketUri, cancellationToken);
             int id = 0;
+            string fullscreenSource = WindowFullscreenRuntime.Source
+                + Environment.NewLine
+                + YouTubeChromeCleanup.Source;
 
             await SendCommandAsync(socket, ++id, "Page.enable", null, cancellationToken);
             await SendCommandAsync(socket, ++id, "Runtime.enable", null, cancellationToken);
@@ -370,7 +373,7 @@ internal static class DevToolsController
                 socket,
                 ++id,
                 "Page.addScriptToEvaluateOnNewDocument",
-                new { source = WindowFullscreenRuntime.Source, runImmediately = true },
+                new { source = fullscreenSource, runImmediately = true },
                 cancellationToken);
             await SendCommandAsync(
                 socket,
@@ -378,7 +381,7 @@ internal static class DevToolsController
                 "Runtime.evaluate",
                 new
                 {
-                    expression = WindowFullscreenRuntime.Source,
+                    expression = fullscreenSource,
                     awaitPromise = false,
                     returnByValue = false,
                     userGesture = true
