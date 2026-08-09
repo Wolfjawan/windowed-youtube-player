@@ -1,0 +1,34 @@
+name: Startup smoke test
+
+on:
+  pull_request:
+    branches: ["main"]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  startup-smoke:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore application icon
+        shell: pwsh
+        run: |
+          $bytes = [Convert]::FromBase64String((Get-Content assets/app.ico.b64 -Raw).Trim())
+          [IO.File]::WriteAllBytes("src/WindowedYouTubePlayer/app.ico", $bytes)
+
+      - name: Construct and layout the real main window
+        shell: pwsh
+        run: |
+          dotnet run --project tests/StartupSmoke/StartupSmoke.csproj --configuration Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

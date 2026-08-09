@@ -13,11 +13,19 @@ internal sealed class CompactServicePanel : ScrollableControl
 
     public CompactServicePanel()
     {
+        // WinForms requires transparent-background support to be enabled before
+        // assigning a transparent BackColor. Reversing this order throws during
+        // MainForm construction and prevents the application from starting.
+        SetStyle(
+            ControlStyles.UserPaint
+            | ControlStyles.AllPaintingInWmPaint
+            | ControlStyles.OptimizedDoubleBuffer
+            | ControlStyles.SupportsTransparentBackColor,
+            true);
+        BackColor = Color.Transparent;
         AutoScroll = true;
         DoubleBuffered = true;
-        BackColor = Color.Transparent;
         Padding = new Padding(8, 12, 8, 12);
-        SetStyle(ControlStyles.SupportsTransparentBackColor, true);
     }
 
     protected override void OnLayout(LayoutEventArgs levent)
@@ -70,27 +78,29 @@ internal sealed class CompactServicePanel : ScrollableControl
 
 internal sealed class CompactServiceButton : Control
 {
-    private readonly SiteChoice site;
     private readonly ServiceBrand brand;
     private bool hovered;
     private bool pressed;
 
-    public CompactServiceButton(SiteChoice siteChoice)
+    public CompactServiceButton(SiteChoice site)
     {
-        site = siteChoice;
-        brand = ServiceVisuals.For(siteChoice).Brand;
-        DoubleBuffered = true;
-        Cursor = Cursors.Hand;
-        TabStop = true;
-        BackColor = Color.Transparent;
-        AccessibleName = $"Open {site.DisplayName}";
-        AccessibleRole = AccessibleRole.PushButton;
+        brand = ServiceVisuals.For(site).Brand;
+
+        // Enable transparency first. Setting BackColor before this style is the
+        // exact v0.6.2 startup crash reported on Windows.
         SetStyle(
             ControlStyles.Selectable
             | ControlStyles.UserPaint
             | ControlStyles.AllPaintingInWmPaint
+            | ControlStyles.OptimizedDoubleBuffer
             | ControlStyles.SupportsTransparentBackColor,
             true);
+        BackColor = Color.Transparent;
+        DoubleBuffered = true;
+        Cursor = Cursors.Hand;
+        TabStop = true;
+        AccessibleName = $"Open {site.DisplayName}";
+        AccessibleRole = AccessibleRole.PushButton;
     }
 
     protected override void OnMouseEnter(EventArgs e)
@@ -151,7 +161,6 @@ internal sealed class CompactServiceButton : Control
     protected override void OnPaint(PaintEventArgs e)
     {
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
         float scale = pressed ? 0.90f : hovered ? 1.06f : 1f;
         RectangleF iconArea = new(24, 17, Width - 48, Height - 34);
@@ -166,8 +175,7 @@ internal sealed class CompactServiceButton : Control
         if (hovered || Focused)
         {
             using GraphicsPath glowPath = new();
-            RectangleF glowArea = new(10, 8, Width - 20, Height - 16);
-            glowPath.AddEllipse(glowArea);
+            glowPath.AddEllipse(new RectangleF(10, 8, Width - 20, Height - 16));
             using PathGradientBrush glow = new(glowPath)
             {
                 CenterColor = Color.FromArgb(45, 255, 255, 255),
@@ -244,9 +252,9 @@ internal sealed class CompactServiceButton : Control
             outer.Height * 0.31f);
         using SolidBrush orangeBrush = new(Color.FromArgb(244, 117, 33));
         graphics.FillEllipse(orangeBrush, eye);
-        using SolidBrush background = new(Color.FromArgb(14, 13, 27));
+        using SolidBrush dark = new(Color.FromArgb(14, 13, 27));
         float inset = Math.Max(4f, eye.Width * 0.28f);
-        graphics.FillEllipse(background, new RectangleF(
+        graphics.FillEllipse(dark, new RectangleF(
             eye.X + inset,
             eye.Y + inset,
             Math.Max(3, eye.Width - inset * 2),
@@ -257,9 +265,8 @@ internal sealed class CompactServiceButton : Control
     {
         using Font primeFont = new("Segoe UI", 15.5f, FontStyle.Bold, GraphicsUnit.Point);
         using SolidBrush white = new(Color.White);
-        StringFormat format = new() { Alignment = StringAlignment.Center };
-        RectangleF word = new(area.X - 8, area.Y + 4, area.Width + 16, 30);
-        graphics.DrawString("prime", primeFont, white, word, format);
+        using StringFormat format = new() { Alignment = StringAlignment.Center };
+        graphics.DrawString("prime", primeFont, white, new RectangleF(area.X - 8, area.Y + 4, area.Width + 16, 30), format);
 
         using Pen smile = new(Color.FromArgb(0, 168, 225), 3f)
         {
@@ -279,7 +286,7 @@ internal sealed class CompactServiceButton : Control
     private static void DrawBbcIPlayer(Graphics graphics, RectangleF area)
     {
         float boxSize = Math.Min(18f, area.Width / 4.6f);
-        float totalWidth = boxSize * 3 + 5 * 2;
+        float totalWidth = boxSize * 3 + 10;
         float startX = area.X + (area.Width - totalWidth) / 2f;
         float top = area.Y + 6;
 
