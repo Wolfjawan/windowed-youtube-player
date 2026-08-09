@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text.Json.Nodes;
 
 namespace WindowedYouTubePlayer;
 
@@ -56,6 +57,7 @@ internal sealed class BrowserSession : IDisposable
             "WindowFullscreenExtension");
 
         Directory.CreateDirectory(profileDirectory);
+        RepairLegacyProfile();
         WindowFullscreenExtension.Install(extensionDirectory);
     }
 
@@ -66,7 +68,9 @@ internal sealed class BrowserSession : IDisposable
 
         try
         {
+            RepairLegacyProfile();
             WindowFullscreenExtension.Install(extensionDirectory);
+
             Process? process = StartBrowser(siteUrl);
             if (process is null)
             {
@@ -124,6 +128,8 @@ internal sealed class BrowserSession : IDisposable
             WorkingDirectory = Path.GetDirectoryName(browserPath) ?? Environment.CurrentDirectory
         };
 
+        // Match the last known-good pre-installer runtime: direct app mode plus a
+        // local unpacked extension. No remote-debugging flags and no about:blank hop.
         startInfo.ArgumentList.Add($"--user-data-dir={profileDirectory}");
         startInfo.ArgumentList.Add($"--load-extension={extensionDirectory}");
         startInfo.ArgumentList.Add($"--app={siteUrl}");
@@ -135,6 +141,50 @@ internal sealed class BrowserSession : IDisposable
         startInfo.ArgumentList.Add("--disable-background-mode");
 
         return Process.Start(startInfo);
+    }
+
+    private void RepairLegacyProfile()
+    {
+        string preferencesPath = Path.Combine(profileDirectory, "Default", "Preferences");
+        if (!File.Exists(preferencesPath))
+        {
+            return;
+        }
+
+        try
+        {
+            JsonNode? parsed = JsonNode.Parse(File.ReadAllText(preferencesPath));
+            if (parsed is not JsonObject root)
+            {
+                return;
+            }
+
+            SetBoolean(root, true, "fullscreen", "allowed");
+            SetBoolean(root, true, "apps", "fullscreen", "allowed");
+            File.WriteAllText(preferencesPath, root.ToJsonString());
+        }
+        catch
+        {
+            // Profile repair is only for v0.5.4/v0.5.5 compatibility. The direct
+            // app-mode launch remains usable when Chromium owns or rewrites this file.
+        }
+    }
+
+    private static void SetBoolean(JsonObject root, bool value, params string[] path)
+    {
+        JsonObject current = root;
+        for (int index = 0; index < path.Length - 1; index++)
+        {
+            string segment = path[index];
+            if (current[segment] is not JsonObject child)
+            {
+                child = new JsonObject();
+                current[segment] = child;
+            }
+            current = child;
+        }
+
+        current[path[^1]] = value;
     }
 
     private static string SafeDirectoryName(string value)
