@@ -365,7 +365,9 @@ internal static class DevToolsController
             int id = 0;
             string fullscreenSource = WindowFullscreenRuntime.Source
                 + Environment.NewLine
-                + YouTubeChromeCleanup.Source;
+                + YouTubeChromeCleanup.Source
+                + Environment.NewLine
+                + CrunchyrollFullscreenGuard.Source;
 
             await SendCommandAsync(socket, ++id, "Page.enable", null, cancellationToken);
             await SendCommandAsync(socket, ++id, "Runtime.enable", null, cancellationToken);
